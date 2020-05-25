@@ -3,10 +3,10 @@ package middleware
 import (
 	"expvar"
 	"fmt"
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 	"net/http"
 	"net/http/pprof"
-
-	"github.com/go-chi/chi"
 )
 
 // Profiler is a convenient subrouter used for mounting net/http/pprof. ie.
@@ -18,38 +18,38 @@ import (
 //    // ..routes
 //    return r
 //  }
-func Profiler() http.Handler {
-	r := chi.NewRouter()
+func Profiler() fchi.Handler {
+	r := fchi.NewRouter()
 	r.Use(NoCache)
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, r.RequestURI+"/pprof/", 301)
-	})
-	r.HandleFunc("/pprof", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, r.RequestURI+"/", 301)
-	})
+	r.Get("/", fchi.HandlerFunc(func(rc *fasthttp.RequestCtx) {
+		rc.Redirect(string(rc.Request.URI().RequestURI())+"/pprof/", fasthttp.StatusMovedPermanently)
+	}))
+	r.Handle("/pprof", fchi.HandlerFunc(func(rc *fasthttp.RequestCtx) {
+		rc.Redirect(string(rc.Request.URI().RequestURI())+"/pprof/", fasthttp.StatusMovedPermanently)
+	}))
 
-	r.HandleFunc("/pprof/*", pprof.Index)
-	r.HandleFunc("/pprof/cmdline", pprof.Cmdline)
-	r.HandleFunc("/pprof/profile", pprof.Profile)
-	r.HandleFunc("/pprof/symbol", pprof.Symbol)
-	r.HandleFunc("/pprof/trace", pprof.Trace)
-	r.HandleFunc("/vars", expVars)
+	r.Handle("/pprof/*", fchi.Adapt(http.HandlerFunc(pprof.Index)))
+	r.Handle("/pprof/cmdline", fchi.Adapt(http.HandlerFunc(pprof.Cmdline)))
+	r.Handle("/pprof/profile", fchi.Adapt(http.HandlerFunc(pprof.Profile)))
+	r.Handle("/pprof/symbol", fchi.Adapt(http.HandlerFunc(pprof.Symbol)))
+	r.Handle("/pprof/trace", fchi.Adapt(http.HandlerFunc(pprof.Trace)))
+	r.Handle("/vars", fchi.HandlerFunc(expVars))
 
 	return r
 }
 
 // Replicated from expvar.go as not public.
-func expVars(w http.ResponseWriter, r *http.Request) {
+func expVars(rc *fasthttp.RequestCtx) {
 	first := true
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, "{\n")
+	rc.Response.Header.SetContentType("application/json")
+	fmt.Fprintf(rc.Response.BodyWriter(), "{\n")
 	expvar.Do(func(kv expvar.KeyValue) {
 		if !first {
-			fmt.Fprintf(w, ",\n")
+			fmt.Fprintf(rc.Response.BodyWriter(), ",\n")
 		}
 		first = false
-		fmt.Fprintf(w, "%q: %s", kv.Key, kv.Value)
+		fmt.Fprintf(rc.Response.BodyWriter(), "%q: %s", kv.Key, kv.Value)
 	})
-	fmt.Fprintf(w, "\n}\n")
+	fmt.Fprintf(rc.Response.BodyWriter(), "\n}\n")
 }

@@ -2,7 +2,8 @@ package middleware
 
 import (
 	"context"
-	"net/http"
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 	"time"
 )
 
@@ -30,20 +31,20 @@ import (
 // 	 w.Write([]byte("done"))
 //  })
 //
-func Timeout(timeout time.Duration) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		fn := func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+func Timeout(timeout time.Duration) func(next fchi.Handler) fchi.Handler {
+	return func(next fchi.Handler) fchi.Handler {
+		fn := func(rc *fasthttp.RequestCtx) {
+			ctx, cancel := context.WithTimeout(fchi.Ctx(rc), timeout)
 			defer func() {
 				cancel()
 				if ctx.Err() == context.DeadlineExceeded {
-					w.WriteHeader(http.StatusGatewayTimeout)
+					rc.SetStatusCode(fasthttp.StatusGatewayTimeout)
 				}
 			}()
 
-			r = r.WithContext(ctx)
-			next.ServeHTTP(w, r)
+			fchi.SetCtx(ctx, rc)
+			next.ServeHTTP(rc)
 		}
-		return http.HandlerFunc(fn)
+		return fchi.HandlerFunc(fn)
 	}
 }

@@ -1,32 +1,64 @@
 package middleware
 
 import (
+	"encoding/base64"
 	"fmt"
-	"net/http"
+	"strings"
+
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 // BasicAuth implements a simple middleware handler for adding basic http auth to a route.
-func BasicAuth(realm string, creds map[string]string) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			user, pass, ok := r.BasicAuth()
+func BasicAuth(realm string, creds map[string]string) func(next fchi.Handler) fchi.Handler {
+	return func(next fchi.Handler) fchi.Handler {
+		return fchi.HandlerFunc(func(rc *fasthttp.RequestCtx) {
+			user, pass, ok := basicAuth(rc)
 			if !ok {
-				basicAuthFailed(w, realm)
+				basicAuthFailed(rc, realm)
 				return
 			}
 
 			credPass, credUserOk := creds[user]
 			if !credUserOk || pass != credPass {
-				basicAuthFailed(w, realm)
+				basicAuthFailed(rc, realm)
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(rc)
 		})
 	}
 }
 
-func basicAuthFailed(w http.ResponseWriter, realm string) {
-	w.Header().Add("WWW-Authenticate", fmt.Sprintf(`Basic realm="%s"`, realm))
-	w.WriteHeader(http.StatusUnauthorized)
+func basicAuthFailed(rc *fasthttp.RequestCtx, realm string) {
+	rc.Response.Header.Add("WWW-Authenticate", fmt.Sprintf(`Basic realm="%s"`, realm))
+	rc.SetStatusCode(fasthttp.StatusUnauthorized)
+}
+
+func basicAuth(rc *fasthttp.RequestCtx) (username, password string, ok bool) {
+	auth := rc.Request.Header.Peek("Authorization")
+	if len(auth) == 0 {
+		return
+	}
+	return parseBasicAuth(string(auth))
+}
+
+// parseBasicAuth parses an HTTP Basic Authentication string.
+// "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==" returns ("Aladdin", "open sesame", true).
+func parseBasicAuth(auth string) (username, password string, ok bool) {
+	const prefix = "Basic "
+	// Case insensitive prefix match. See Issue 22736.
+	if len(auth) < len(prefix) || !strings.EqualFold(auth[:len(prefix)], prefix) {
+		return
+	}
+	c, err := base64.StdEncoding.DecodeString(auth[len(prefix):])
+	if err != nil {
+		return
+	}
+	cs := string(c)
+	s := strings.IndexByte(cs, ':')
+	if s < 0 {
+		return
+	}
+	return cs[:s], cs[s+1:], true
 }

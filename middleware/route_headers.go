@@ -1,3 +1,6 @@
+// TODO convert middleware to fasthttp.
+// +build ignore
+
 package middleware
 
 import (
@@ -30,13 +33,13 @@ import (
 // r := chi.NewRouter()
 //
 // r.Use(middleware.RouteHeaders().
-//   Route("Origin", "https://app.skyweaver.net", cors.Handler(cors.Options{
+//   Route("Origin", "https://app.skyweaver.net", cors.Handler(cors.HandlerTrait{
 // 	   AllowedOrigins:   []string{"https://api.skyweaver.net"},
 // 	   AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 // 	   AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 // 	   AllowCredentials: true, // <----------<<< allow credentials
 //   })).
-//   Route("Origin", "*", cors.Handler(cors.Options{
+//   Route("Origin", "*", cors.Handler(cors.HandlerTrait{
 // 	   AllowedOrigins:   []string{"*"},
 // 	   AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 // 	   AllowedHeaders:   []string{"Accept", "Content-Type"},

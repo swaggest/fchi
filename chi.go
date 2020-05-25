@@ -53,26 +53,48 @@
 //  "/page/*/index" also matches "/page/intro/latest"
 //  "/date/{yyyy:\\d\\d\\d\\d}/{mm:\\d\\d}/{dd:\\d\\d}" matches "/date/2017/04/01"
 //
-package chi
+package fchi
 
-import "net/http"
+import (
+	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
+	"net/http"
+)
 
 // NewRouter returns a new Mux object that implements the Router interface.
 func NewRouter() *Mux {
 	return NewMux()
 }
 
+// HandlerFunc implements Handler.
+type HandlerFunc func(rctx *fasthttp.RequestCtx)
+
+// ServeHTTP serves http request.
+func (f HandlerFunc) ServeHTTP(rc *fasthttp.RequestCtx) {
+	f(rc)
+}
+
+// Handler is a FastHTTP handler.
+type Handler interface {
+	ServeHTTP(rc *fasthttp.RequestCtx)
+}
+
+// Adapt makes Handler from http.Handler.
+func Adapt(h http.Handler) Handler {
+	return HandlerFunc(fasthttpadaptor.NewFastHTTPHandler(h))
+}
+
 // Router consisting of the core routing methods used by chi's Mux,
 // using only the standard net/http.
 type Router interface {
-	http.Handler
+	Handler
 	Routes
 
 	// Use appends one or more middlewares onto the Router stack.
-	Use(middlewares ...func(http.Handler) http.Handler)
+	Use(middlewares ...func(Handler) Handler)
 
 	// With adds inline middlewares for an endpoint handler.
-	With(middlewares ...func(http.Handler) http.Handler) Router
+	With(middlewares ...func(Handler) Handler) Router
 
 	// Group adds a new inline-Router along the current routing
 	// path, with a fresh middleware stack for the inline-Router.
@@ -81,37 +103,35 @@ type Router interface {
 	// Route mounts a sub-Router along a `pattern`` string.
 	Route(pattern string, fn func(r Router)) Router
 
-	// Mount attaches another http.Handler along ./pattern/*
-	Mount(pattern string, h http.Handler)
+	// Mount attaches another Handler along ./pattern/*
+	Mount(pattern string, h Handler)
 
 	// Handle and HandleFunc adds routes for `pattern` that matches
 	// all HTTP methods.
-	Handle(pattern string, h http.Handler)
-	HandleFunc(pattern string, h http.HandlerFunc)
+	Handle(pattern string, h Handler)
 
 	// Method and MethodFunc adds routes for `pattern` that matches
 	// the `method` HTTP method.
-	Method(method, pattern string, h http.Handler)
-	MethodFunc(method, pattern string, h http.HandlerFunc)
+	Method(method, pattern string, h Handler)
 
 	// HTTP-method routing along `pattern`
-	Connect(pattern string, h http.HandlerFunc)
-	Delete(pattern string, h http.HandlerFunc)
-	Get(pattern string, h http.HandlerFunc)
-	Head(pattern string, h http.HandlerFunc)
-	Options(pattern string, h http.HandlerFunc)
-	Patch(pattern string, h http.HandlerFunc)
-	Post(pattern string, h http.HandlerFunc)
-	Put(pattern string, h http.HandlerFunc)
-	Trace(pattern string, h http.HandlerFunc)
+	Connect(pattern string, h Handler)
+	Delete(pattern string, h Handler)
+	Get(pattern string, h Handler)
+	Head(pattern string, h Handler)
+	Options(pattern string, h Handler)
+	Patch(pattern string, h Handler)
+	Post(pattern string, h Handler)
+	Put(pattern string, h Handler)
+	Trace(pattern string, h Handler)
 
 	// NotFound defines a handler to respond whenever a route could
 	// not be found.
-	NotFound(h http.HandlerFunc)
+	NotFound(h Handler)
 
 	// MethodNotAllowed defines a handler to respond whenever a method is
 	// not allowed.
-	MethodNotAllowed(h http.HandlerFunc)
+	MethodNotAllowed(h Handler)
 }
 
 // Routes interface adds two methods for router traversal, which is also
@@ -130,5 +150,5 @@ type Routes interface {
 }
 
 // Middlewares type is a slice of standard middleware handlers with methods
-// to compose middleware chains and http.Handler's.
-type Middlewares []func(http.Handler) http.Handler
+// to compose middleware chains and Handler's.
+type Middlewares []func(Handler) Handler

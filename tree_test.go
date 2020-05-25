@@ -1,4 +1,4 @@
-package chi
+package fchi
 
 import (
 	"fmt"
