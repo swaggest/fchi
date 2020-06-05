@@ -1,29 +1,15 @@
 package fchi
 
 import (
-	"context"
-	"github.com/valyala/fasthttp"
 	"strings"
+
+	"github.com/valyala/fasthttp"
 )
 
 var (
 	// routeUserValueKey is the user value key to store the request context.
 	routeUserValueKey = "fchiRouteCtx"
-
-	ctxUserValueKey = "fchiCtx"
 )
-
-func Ctx(rc *fasthttp.RequestCtx) context.Context {
-	if ctx, ok := rc.UserValue(ctxUserValueKey).(context.Context); ok {
-		return ctx
-	}
-
-	return context.Background()
-}
-
-func SetCtx(ctx context.Context, rc *fasthttp.RequestCtx) {
-	rc.SetUserValue(ctxUserValueKey, ctx)
-}
 
 // Context is the default routing context set on the root node of a
 // request context to track route patterns, URL parameters and

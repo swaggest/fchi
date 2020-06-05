@@ -1,6 +1,8 @@
 package fchi
 
 import (
+	"context"
+
 	"github.com/valyala/fasthttp"
 )
 
@@ -29,8 +31,8 @@ type ChainHandler struct {
 	chain       Handler
 }
 
-func (c *ChainHandler) ServeHTTP(rctx *fasthttp.RequestCtx) {
-	c.chain.ServeHTTP(rctx)
+func (c *ChainHandler) ServeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
+	c.chain.ServeHTTP(ctx, rc)
 }
 
 // chain builds a Handler composed of an inline middleware stack and endpoint

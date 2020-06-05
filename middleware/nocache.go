@@ -4,6 +4,7 @@ package middleware
 // https://github.com/zenazn/goji/tree/master/web/middleware
 
 import (
+	"context"
 	"github.com/swaggest/fchi"
 	"github.com/valyala/fasthttp"
 	"time"
@@ -38,7 +39,7 @@ var etagHeaders = []string{
 //      X-Accel-Expires: 0
 //      Pragma: no-cache (for HTTP/1.0 proxies/clients)
 func NoCache(h fchi.Handler) fchi.Handler {
-	fn := func(rc *fasthttp.RequestCtx) {
+	fn := func(ctx context.Context, rc *fasthttp.RequestCtx) {
 
 		// Delete any ETag headers that may have been set
 		for _, v := range etagHeaders {
@@ -52,7 +53,7 @@ func NoCache(h fchi.Handler) fchi.Handler {
 			rc.Response.Header.Set(k, v)
 		}
 
-		h.ServeHTTP(rc)
+		h.ServeHTTP(ctx, rc)
 	}
 
 	return fchi.HandlerFunc(fn)

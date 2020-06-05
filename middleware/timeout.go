@@ -33,8 +33,8 @@ import (
 //
 func Timeout(timeout time.Duration) func(next fchi.Handler) fchi.Handler {
 	return func(next fchi.Handler) fchi.Handler {
-		fn := func(rc *fasthttp.RequestCtx) {
-			ctx, cancel := context.WithTimeout(fchi.Ctx(rc), timeout)
+		fn := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer func() {
 				cancel()
 				if ctx.Err() == context.DeadlineExceeded {
@@ -42,8 +42,7 @@ func Timeout(timeout time.Duration) func(next fchi.Handler) fchi.Handler {
 				}
 			}()
 
-			fchi.SetCtx(ctx, rc)
-			next.ServeHTTP(rc)
+			next.ServeHTTP(ctx, rc)
 		}
 		return fchi.HandlerFunc(fn)
 	}

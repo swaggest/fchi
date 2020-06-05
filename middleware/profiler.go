@@ -1,12 +1,14 @@
 package middleware
 
 import (
+	"context"
 	"expvar"
 	"fmt"
-	"github.com/swaggest/fchi"
-	"github.com/valyala/fasthttp"
 	"net/http"
 	"net/http/pprof"
+
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 // Profiler is a convenient subrouter used for mounting net/http/pprof. ie.
@@ -22,10 +24,10 @@ func Profiler() fchi.Handler {
 	r := fchi.NewRouter()
 	r.Use(NoCache)
 
-	r.Get("/", fchi.HandlerFunc(func(rc *fasthttp.RequestCtx) {
+	r.Get("/", fchi.HandlerFunc(func(_ context.Context, rc *fasthttp.RequestCtx) {
 		rc.Redirect(string(rc.Request.URI().RequestURI())+"/pprof/", fasthttp.StatusMovedPermanently)
 	}))
-	r.Handle("/pprof", fchi.HandlerFunc(func(rc *fasthttp.RequestCtx) {
+	r.Handle("/pprof", fchi.HandlerFunc(func(_ context.Context, rc *fasthttp.RequestCtx) {
 		rc.Redirect(string(rc.Request.URI().RequestURI())+"/pprof/", fasthttp.StatusMovedPermanently)
 	}))
 
@@ -40,7 +42,7 @@ func Profiler() fchi.Handler {
 }
 
 // Replicated from expvar.go as not public.
-func expVars(rc *fasthttp.RequestCtx) {
+func expVars(_ context.Context, rc *fasthttp.RequestCtx) {
 	first := true
 	rc.Response.Header.SetContentType("application/json")
 	fmt.Fprintf(rc.Response.BodyWriter(), "{\n")

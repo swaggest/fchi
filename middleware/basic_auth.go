@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -12,7 +13,7 @@ import (
 // BasicAuth implements a simple middleware handler for adding basic http auth to a route.
 func BasicAuth(realm string, creds map[string]string) func(next fchi.Handler) fchi.Handler {
 	return func(next fchi.Handler) fchi.Handler {
-		return fchi.HandlerFunc(func(rc *fasthttp.RequestCtx) {
+		return fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			user, pass, ok := basicAuth(rc)
 			if !ok {
 				basicAuthFailed(rc, realm)
@@ -25,7 +26,7 @@ func BasicAuth(realm string, creds map[string]string) func(next fchi.Handler) fc
 				return
 			}
 
-			next.ServeHTTP(rc)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 }

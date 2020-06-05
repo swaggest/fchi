@@ -56,9 +56,11 @@
 package fchi
 
 import (
+	"context"
+	"net/http"
+
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
-	"net/http"
 )
 
 // NewRouter returns a new Mux object that implements the Router interface.
@@ -67,21 +69,32 @@ func NewRouter() *Mux {
 }
 
 // HandlerFunc implements Handler.
-type HandlerFunc func(rctx *fasthttp.RequestCtx)
+type HandlerFunc func(ctx context.Context, rc *fasthttp.RequestCtx)
 
 // ServeHTTP serves http request.
-func (f HandlerFunc) ServeHTTP(rc *fasthttp.RequestCtx) {
-	f(rc)
+func (f HandlerFunc) ServeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
+	f(ctx, rc)
 }
 
 // Handler is a FastHTTP handler.
 type Handler interface {
-	ServeHTTP(rc *fasthttp.RequestCtx)
+	ServeHTTP(ctx context.Context, rc *fasthttp.RequestCtx)
+}
+
+// RequestHandler makes fasthttp.RequestHandler function from Handler.
+func RequestHandler(handler Handler) fasthttp.RequestHandler {
+	return func(rc *fasthttp.RequestCtx) {
+		handler.ServeHTTP(rc, rc)
+	}
 }
 
 // Adapt makes Handler from http.Handler.
 func Adapt(h http.Handler) Handler {
-	return HandlerFunc(fasthttpadaptor.NewFastHTTPHandler(h))
+	f := fasthttpadaptor.NewFastHTTPHandler(h)
+
+	return HandlerFunc(func(_ context.Context, rc *fasthttp.RequestCtx) {
+		f(rc)
+	})
 }
 
 // Router consisting of the core routing methods used by chi's Mux,

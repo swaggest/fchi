@@ -1,10 +1,12 @@
 package fchi
 
 import (
+	"context"
 	"fmt"
-	"github.com/valyala/fasthttp"
 	"strings"
 	"sync"
+
+	"github.com/valyala/fasthttp"
 )
 
 var _ Router = &Mux{}
@@ -56,17 +58,17 @@ func NewMux() *Mux {
 // ServeHTTP is the single method of the Handler interface that makes
 // Mux interoperable with the standard library. It uses a sync.Pool to get and
 // reuse routing contexts for each request.
-func (mx *Mux) ServeHTTP(frc *fasthttp.RequestCtx) {
+func (mx *Mux) ServeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
 	// Ensure the mux has some routes defined on the mux
 	if mx.handler == nil {
-		mx.NotFoundHandler().ServeHTTP(frc)
+		mx.NotFoundHandler().ServeHTTP(ctx, rc)
 		return
 	}
 
 	// Check if a routing context already exists from a parent router.
-	rctx, _ := frc.UserValue(routeUserValueKey).(*Context)
+	rctx, _ := rc.UserValue(routeUserValueKey).(*Context)
 	if rctx != nil {
-		mx.handler.ServeHTTP(frc)
+		mx.handler.ServeHTTP(ctx, rc)
 		return
 	}
 
@@ -78,10 +80,10 @@ func (mx *Mux) ServeHTTP(frc *fasthttp.RequestCtx) {
 	rctx.Reset()
 	rctx.Routes = mx
 
-	frc.SetUserValue(routeUserValueKey, rctx)
+	rc.SetUserValue(routeUserValueKey, rctx)
 
 	// Serve the request and once its done, put the request context back in the sync pool
-	mx.handler.ServeHTTP(frc)
+	mx.handler.ServeHTTP(ctx, rc)
 	mx.pool.Put(rctx)
 }
 
@@ -276,10 +278,10 @@ func (mx *Mux) Mount(pattern string, handler Handler) {
 		subr.MethodNotAllowed(mx.methodNotAllowedHandler)
 	}
 
-	mountHandler := HandlerFunc(func(rc *fasthttp.RequestCtx) {
+	mountHandler := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		rctx := RouteContext(rc)
 		rctx.RoutePath = mx.nextRoutePath(rctx)
-		handler.ServeHTTP(rc)
+		handler.ServeHTTP(ctx, rc)
 	})
 
 	if pattern == "" || pattern[len(pattern)-1] != '/' {
@@ -339,10 +341,10 @@ func (mx *Mux) NotFoundHandler() Handler {
 	if mx.notFoundHandler != nil {
 		return mx.notFoundHandler
 	}
-	return HandlerFunc(func(rctx *fasthttp.RequestCtx) {
-		rctx.SetStatusCode(fasthttp.StatusNotFound)
-		rctx.SetContentType("text/plain; charset=utf-8")
-		_, _ = rctx.Write([]byte("404 page not found"))
+	return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.SetStatusCode(fasthttp.StatusNotFound)
+		rc.SetContentType("text/plain; charset=utf-8")
+		_, _ = rc.Write([]byte("404 page not found"))
 	})
 }
 
@@ -353,8 +355,8 @@ func (mx *Mux) MethodNotAllowedHandler() Handler {
 		return mx.methodNotAllowedHandler
 	}
 
-	return HandlerFunc(func(rctx *fasthttp.RequestCtx) {
-		rctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
+	return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.SetStatusCode(fasthttp.StatusMethodNotAllowed)
 	})
 }
 
@@ -393,7 +395,7 @@ func (mx *Mux) handle(method methodTyp, pattern string, handler Handler) *node {
 
 // routeHTTP routes a http.Request through the Mux routing tree to serve
 // the matching handler for a particular http method.
-func (mx *Mux) routeHTTP(rc *fasthttp.RequestCtx) {
+func (mx *Mux) routeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
 	// Grab the route context object
 	rctx := RouteContext(rc)
 
@@ -409,19 +411,19 @@ func (mx *Mux) routeHTTP(rc *fasthttp.RequestCtx) {
 	}
 	method, ok := methodMap[rctx.RouteMethod]
 	if !ok {
-		mx.MethodNotAllowedHandler().ServeHTTP(rc)
+		mx.MethodNotAllowedHandler().ServeHTTP(ctx, rc)
 		return
 	}
 
 	// Find the route
 	if _, _, h := mx.tree.FindRoute(rctx, method, routePath); h != nil {
-		h.ServeHTTP(rc)
+		h.ServeHTTP(ctx, rc)
 		return
 	}
 	if rctx.methodNotAllowed {
-		mx.MethodNotAllowedHandler().ServeHTTP(rc)
+		mx.MethodNotAllowedHandler().ServeHTTP(ctx, rc)
 	} else {
-		mx.NotFoundHandler().ServeHTTP(rc)
+		mx.NotFoundHandler().ServeHTTP(ctx, rc)
 	}
 }
 
