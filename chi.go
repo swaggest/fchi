@@ -1,5 +1,5 @@
 //
-// Package chi is a small, idiomatic and composable router for building HTTP services.
+// Package fchi is a small, idiomatic and composable router for building HTTP services.
 //
 // chi requires Go 1.10 or newer.
 //
