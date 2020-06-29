@@ -140,7 +140,7 @@ func (mx *Mux) Head(pattern string, handler Handler) {
 	mx.handle(mHEAD, pattern, handler)
 }
 
-// HandlerTrait adds the route `pattern` that matches a OPTIONS http method to
+// Options adds the route `pattern` that matches a OPTIONS http method to
 // execute the `handlerFn` HandlerFunc.
 func (mx *Mux) Options(pattern string, handler Handler) {
 	mx.handle(mOPTIONS, pattern, handler)
@@ -402,7 +402,7 @@ func (mx *Mux) routeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
 	// The request routing path
 	routePath := rctx.RoutePath
 	if routePath == "" {
-		routePath = string(rc.URI().Path())
+		routePath = string(rc.URI().PathOriginal())
 	}
 
 	// Check if method is supported by chi

@@ -8,94 +8,124 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
+
+type testServer struct {
+	URL  string
+	fsrv fasthttp.Server
+}
+
+func newTestServer(r Handler) *testServer {
+	ts := testServer{}
+
+	ts.fsrv.Handler = RequestHandler(r)
+	ts.fsrv.IdleTimeout = 10 * time.Millisecond
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		if l, err = net.Listen("tcp6", "[::1]:0"); err != nil {
+			panic(fmt.Sprintf("httptest: failed to listen on a port: %v", err))
+		}
+	}
+	ts.URL = "http://" + l.Addr().String()
+
+	go func() {
+		ts.fsrv.Serve(l)
+	}()
+
+	return &ts
+}
+
+func (ts *testServer) Close() {
+	err := ts.fsrv.Shutdown()
+	if err != nil {
+		panic(err)
+	}
+}
 
 func TestMuxBasic(t *testing.T) {
 	var count uint64
-	countermw := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	countermw := func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			count++
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
-	usermw := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
+	usermw := func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			ctx = context.WithValue(ctx, ctxKey{"user"}, "peter")
-			r = r.WithContext(ctx)
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
-	exmw := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), ctxKey{"ex"}, "a")
-			r = r.WithContext(ctx)
-			next.ServeHTTP(w, r)
+	exmw := func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			ctx = context.WithValue(ctx, ctxKey{"ex"}, "a")
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
 	logbuf := bytes.NewBufferString("")
 	logmsg := "logmw test"
-	logmw := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	logmw := func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			logbuf.WriteString(logmsg)
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
-	cxindex := func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+	cxindex := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		user := ctx.Value(ctxKey{"user"}).(string)
-		w.WriteHeader(200)
-		w.Write([]byte(fmt.Sprintf("hi %s", user)))
+		rc.SetStatusCode(200)
+		rc.Write([]byte(fmt.Sprintf("hi %s", user)))
+	})
+
+	ping := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.SetStatusCode(200)
+		rc.Write([]byte("."))
 	}
 
-	ping := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte("."))
+	headPing := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.Header.Set("X-Ping", "1")
+		rc.Response.SetStatusCode(200)
 	}
 
-	headPing := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Ping", "1")
-		w.WriteHeader(200)
-	}
-
-	createPing := func(w http.ResponseWriter, r *http.Request) {
+	createPing := func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		// create ....
-		w.WriteHeader(201)
+		rc.Response.SetStatusCode(201)
 	}
 
-	pingAll := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte("ping all"))
+	pingAll := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(200)
+		rc.Write([]byte("ping all"))
 	}
 
-	pingAll2 := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte("ping all2"))
+	pingAll2 := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(200)
+		rc.Write([]byte("ping all2"))
 	}
 
-	pingOne := func(w http.ResponseWriter, r *http.Request) {
-		idParam := URLParam(r, "id")
-		w.WriteHeader(200)
-		w.Write([]byte(fmt.Sprintf("ping one id: %s", idParam)))
+	pingOne := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		idParam := URLParam(rc, "id")
+		rc.Response.SetStatusCode(200)
+		rc.Write([]byte(fmt.Sprintf("ping one id: %s", idParam)))
 	}
 
-	pingWoop := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte("woop." + URLParam(r, "iidd")))
+	pingWoop := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(200)
+		rc.Write([]byte("woop." + URLParam(rc, "iidd")))
 	}
 
-	catchAll := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte("catchall"))
+	catchAll := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(200)
+		rc.Write([]byte("catchall"))
 	}
 
 	m := NewRouter()
@@ -104,20 +134,20 @@ func TestMuxBasic(t *testing.T) {
 	m.Use(exmw)
 	m.Use(logmw)
 	m.Get("/", cxindex)
-	m.Method("GET", "/ping", http.HandlerFunc(ping))
-	m.MethodFunc("GET", "/pingall", pingAll)
-	m.MethodFunc("get", "/ping/all", pingAll)
-	m.Get("/ping/all2", pingAll2)
+	m.Method("GET", "/ping", HandlerFunc(ping))
+	m.Method("GET", "/pingall", HandlerFunc(pingAll))
+	m.Method("get", "/ping/all", HandlerFunc(pingAll))
+	m.Get("/ping/all2", HandlerFunc(pingAll2))
 
-	m.Head("/ping", headPing)
-	m.Post("/ping", createPing)
-	m.Get("/ping/{id}", pingWoop)
-	m.Get("/ping/{id}", pingOne) // expected to overwrite to pingOne handler
-	m.Get("/ping/{iidd}/woop", pingWoop)
-	m.HandleFunc("/admin/*", catchAll)
+	m.Head("/ping", HandlerFunc(headPing))
+	m.Post("/ping", HandlerFunc(createPing))
+	m.Get("/ping/{id}", HandlerFunc(pingWoop))
+	m.Get("/ping/{id}", HandlerFunc(pingOne)) // expected to overwrite to pingOne handler
+	m.Get("/ping/{iidd}/woop", HandlerFunc(pingWoop))
+	m.Handle("/admin/*", HandlerFunc(catchAll))
 	// m.Post("/admin/*", catchAll)
 
-	ts := httptest.NewServer(m)
+	ts := newTestServer(m)
 	defer ts.Close()
 
 	// GET /
@@ -210,27 +240,27 @@ func TestMuxBasic(t *testing.T) {
 func TestMuxMounts(t *testing.T) {
 	r := NewRouter()
 
-	r.Get("/{hash}", func(w http.ResponseWriter, r *http.Request) {
-		v := URLParam(r, "hash")
-		w.Write([]byte(fmt.Sprintf("/%s", v)))
-	})
+	r.Get("/{hash}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		v := URLParam(rc, "hash")
+		rc.Write([]byte(fmt.Sprintf("/%s", v)))
+	}))
 
 	r.Route("/{hash}/share", func(r Router) {
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			v := URLParam(r, "hash")
-			w.Write([]byte(fmt.Sprintf("/%s/share", v)))
-		})
-		r.Get("/{network}", func(w http.ResponseWriter, r *http.Request) {
-			v := URLParam(r, "hash")
-			n := URLParam(r, "network")
-			w.Write([]byte(fmt.Sprintf("/%s/share/%s", v, n)))
-		})
+		r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			v := URLParam(rc, "hash")
+			rc.Write([]byte(fmt.Sprintf("/%s/share", v)))
+		}))
+		r.Get("/{network}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			v := URLParam(rc, "hash")
+			n := URLParam(rc, "network")
+			rc.Write([]byte(fmt.Sprintf("/%s/share/%s", v, n)))
+		}))
 	})
 
 	m := NewRouter()
 	m.Mount("/sharing", r)
 
-	ts := httptest.NewServer(m)
+	ts := newTestServer(m)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/sharing/aBc", nil); body != "/aBc" {
@@ -246,15 +276,15 @@ func TestMuxMounts(t *testing.T) {
 
 func TestMuxPlain(t *testing.T) {
 	r := NewRouter()
-	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("bye"))
-	})
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(404)
-		w.Write([]byte("nothing here"))
-	})
+	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("bye"))
+	}))
+	r.NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(404)
+		rc.Write([]byte("nothing here"))
+	}))
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -273,11 +303,11 @@ func TestMuxEmptyRoutes(t *testing.T) {
 
 	mux.Handle("/api*", apiRouter)
 
-	if _, body := testHandler(t, mux, "GET", "/", nil); body != "404 page not found\n" {
+	if body := testHandler(mux, "GET", "/"); body != "404 page not found" {
 		t.Fatalf(body)
 	}
 
-	if _, body := testHandler(t, apiRouter, "GET", "/", nil); body != "404 page not found\n" {
+	if body := testHandler(apiRouter, "GET", "/"); body != "404 page not found" {
 		t.Fatalf(body)
 	}
 }
@@ -286,22 +316,22 @@ func TestMuxEmptyRoutes(t *testing.T) {
 // for an example of using a middleware to handle trailing slashes.
 func TestMuxTrailingSlash(t *testing.T) {
 	r := NewRouter()
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(404)
-		w.Write([]byte("nothing here"))
-	})
+	r.NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(404)
+		rc.Write([]byte("nothing here"))
+	}))
 
 	subRoutes := NewRouter()
-	indexHandler := func(w http.ResponseWriter, r *http.Request) {
-		accountID := URLParam(r, "accountID")
-		w.Write([]byte(accountID))
+	indexHandler := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		accountID := URLParam(rc, "accountID")
+		rc.Write([]byte(accountID))
 	}
-	subRoutes.Get("/", indexHandler)
+	subRoutes.Get("/", HandlerFunc(indexHandler))
 
 	r.Mount("/accounts/{accountID}", subRoutes)
-	r.Get("/accounts/{accountID}/", indexHandler)
+	r.Get("/accounts/{accountID}/", HandlerFunc(indexHandler))
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/accounts/admin", nil); body != "admin" {
@@ -318,57 +348,57 @@ func TestMuxTrailingSlash(t *testing.T) {
 func TestMuxNestedNotFound(t *testing.T) {
 	r := NewRouter()
 
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(context.WithValue(r.Context(), ctxKey{"mw"}, "mw"))
-			next.ServeHTTP(w, r)
+	r.Use(func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			ctx = context.WithValue(ctx, ctxKey{"mw"}, "mw")
+			next.ServeHTTP(ctx, rc)
 		})
 	})
 
-	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("bye"))
-	})
+	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("bye"))
+	}))
 
-	r.With(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(context.WithValue(r.Context(), ctxKey{"with"}, "with"))
-			next.ServeHTTP(w, r)
+	r.With(func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			ctx = context.WithValue(ctx, ctxKey{"with"}, "with")
+			next.ServeHTTP(ctx, rc)
 		})
-	}).NotFound(func(w http.ResponseWriter, r *http.Request) {
-		chkMw := r.Context().Value(ctxKey{"mw"}).(string)
-		chkWith := r.Context().Value(ctxKey{"with"}).(string)
-		w.WriteHeader(404)
-		w.Write([]byte(fmt.Sprintf("root 404 %s %s", chkMw, chkWith)))
-	})
+	}).NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		chkMw := ctx.Value(ctxKey{"mw"}).(string)
+		chkWith := ctx.Value(ctxKey{"with"}).(string)
+		rc.Response.SetStatusCode(404)
+		rc.Write([]byte(fmt.Sprintf("root 404 %s %s", chkMw, chkWith)))
+	}))
 
 	sr1 := NewRouter()
 
-	sr1.Get("/sub", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("sub"))
-	})
+	sr1.Get("/sub", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("sub"))
+	}))
 	sr1.Group(func(sr1 Router) {
-		sr1.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r = r.WithContext(context.WithValue(r.Context(), ctxKey{"mw2"}, "mw2"))
-				next.ServeHTTP(w, r)
+		sr1.Use(func(next Handler) Handler {
+			return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+				ctx = context.WithValue(ctx, ctxKey{"mw2"}, "mw2")
+				next.ServeHTTP(ctx, rc)
 			})
 		})
-		sr1.NotFound(func(w http.ResponseWriter, r *http.Request) {
-			chkMw2 := r.Context().Value(ctxKey{"mw2"}).(string)
-			w.WriteHeader(404)
-			w.Write([]byte(fmt.Sprintf("sub 404 %s", chkMw2)))
-		})
+		sr1.NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			chkMw2 := ctx.Value(ctxKey{"mw2"}).(string)
+			rc.Response.SetStatusCode(404)
+			rc.Write([]byte(fmt.Sprintf("sub 404 %s", chkMw2)))
+		}))
 	})
 
 	sr2 := NewRouter()
-	sr2.Get("/sub", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("sub2"))
-	})
+	sr2.Get("/sub", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("sub2"))
+	}))
 
 	r.Mount("/admin1", sr1)
 	r.Mount("/admin2", sr2)
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -395,32 +425,32 @@ func TestMuxNestedNotFound(t *testing.T) {
 
 func TestMuxNestedMethodNotAllowed(t *testing.T) {
 	r := NewRouter()
-	r.Get("/root", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("root"))
-	})
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(405)
-		w.Write([]byte("root 405"))
-	})
+	r.Get("/root", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("root"))
+	}))
+	r.MethodNotAllowed(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(405)
+		rc.Write([]byte("root 405"))
+	}))
 
 	sr1 := NewRouter()
-	sr1.Get("/sub1", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("sub1"))
-	})
-	sr1.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(405)
-		w.Write([]byte("sub1 405"))
-	})
+	sr1.Get("/sub1", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("sub1"))
+	}))
+	sr1.MethodNotAllowed(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(405)
+		rc.Write([]byte("sub1 405"))
+	}))
 
 	sr2 := NewRouter()
-	sr2.Get("/sub2", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("sub2"))
-	})
+	sr2.Get("/sub2", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("sub2"))
+	}))
 
 	r.Mount("/prefix1", sr1)
 	r.Mount("/prefix2", sr2)
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/root", nil); body != "root" {
@@ -446,36 +476,36 @@ func TestMuxNestedMethodNotAllowed(t *testing.T) {
 func TestMuxComplicatedNotFound(t *testing.T) {
 	decorateRouter := func(r *Mux) {
 		// Root router with groups
-		r.Get("/auth", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("auth get"))
-		})
+		r.Get("/auth", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("auth get"))
+		}))
 		r.Route("/public", func(r Router) {
-			r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte("public get"))
-			})
+			r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+				rc.Write([]byte("public get"))
+			}))
 		})
 
 		// sub router with groups
 		sub0 := NewRouter()
 		sub0.Route("/resource", func(r Router) {
-			r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte("private get"))
-			})
+			r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+				rc.Write([]byte("private get"))
+			}))
 		})
 		r.Mount("/private", sub0)
 
 		// sub router with groups
 		sub1 := NewRouter()
 		sub1.Route("/resource", func(r Router) {
-			r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte("private get"))
-			})
+			r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+				rc.Write([]byte("private get"))
+			}))
 		})
-		r.With(func(next http.Handler) http.Handler { return next }).Mount("/private_mw", sub1)
+		r.With(func(next Handler) Handler { return next }).Mount("/private_mw", sub1)
 	}
 
 	testNotFound := func(t *testing.T, r *Mux) {
-		ts := httptest.NewServer(r)
+		ts := newTestServer(r)
 		defer ts.Close()
 
 		// check that we didn't break correct routes
@@ -518,9 +548,9 @@ func TestMuxComplicatedNotFound(t *testing.T) {
 
 	t.Run("pre", func(t *testing.T) {
 		r := NewRouter()
-		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("custom not-found"))
-		})
+		r.NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("custom not-found"))
+		}))
 		decorateRouter(r)
 		testNotFound(t, r)
 	})
@@ -528,9 +558,9 @@ func TestMuxComplicatedNotFound(t *testing.T) {
 	t.Run("post", func(t *testing.T) {
 		r := NewRouter()
 		decorateRouter(r)
-		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("custom not-found"))
-		})
+		r.NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("custom not-found"))
+		}))
 		testNotFound(t, r)
 	})
 }
@@ -538,34 +568,34 @@ func TestMuxComplicatedNotFound(t *testing.T) {
 func TestMuxWith(t *testing.T) {
 	var cmwInit1, cmwHandler1 uint64
 	var cmwInit2, cmwHandler2 uint64
-	mw1 := func(next http.Handler) http.Handler {
+	mw1 := func(next Handler) Handler {
 		cmwInit1++
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			cmwHandler1++
-			r = r.WithContext(context.WithValue(r.Context(), ctxKey{"inline1"}, "yes"))
-			next.ServeHTTP(w, r)
+			ctx = context.WithValue(ctx, ctxKey{"inline1"}, "yes")
+			next.ServeHTTP(ctx, rc)
 		})
 	}
-	mw2 := func(next http.Handler) http.Handler {
+	mw2 := func(next Handler) Handler {
 		cmwInit2++
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			cmwHandler2++
-			r = r.WithContext(context.WithValue(r.Context(), ctxKey{"inline2"}, "yes"))
-			next.ServeHTTP(w, r)
+			ctx = context.WithValue(ctx, ctxKey{"inline2"}, "yes")
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
 	r := NewRouter()
-	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("bye"))
-	})
-	r.With(mw1).With(mw2).Get("/inline", func(w http.ResponseWriter, r *http.Request) {
-		v1 := r.Context().Value(ctxKey{"inline1"}).(string)
-		v2 := r.Context().Value(ctxKey{"inline2"}).(string)
-		w.Write([]byte(fmt.Sprintf("inline %s %s", v1, v2)))
-	})
+	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("bye"))
+	}))
+	r.With(mw1).With(mw2).Get("/inline", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		v1 := ctx.Value(ctxKey{"inline1"}).(string)
+		v2 := ctx.Value(ctxKey{"inline2"}).(string)
+		rc.Write([]byte(fmt.Sprintf("inline %s %s", v1, v2)))
+	}))
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -589,19 +619,19 @@ func TestMuxWith(t *testing.T) {
 }
 
 func TestRouterFromMuxWith(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 
 	r := NewRouter()
 
-	with := r.With(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
+	with := r.With(func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			next.ServeHTTP(ctx, rc)
 		})
 	})
 
-	with.Get("/with_middleware", func(w http.ResponseWriter, r *http.Request) {})
+	with.Get("/with_middleware", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {}))
 
-	ts := httptest.NewServer(with)
+	ts := newTestServer(with)
 	defer ts.Close()
 
 	// Without the fix this test was committed with, this causes a panic.
@@ -610,63 +640,61 @@ func TestRouterFromMuxWith(t *testing.T) {
 
 func TestMuxMiddlewareStack(t *testing.T) {
 	var stdmwInit, stdmwHandler uint64
-	stdmw := func(next http.Handler) http.Handler {
+	stdmw := func(next Handler) Handler {
 		stdmwInit++
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			stdmwHandler++
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 	_ = stdmw
 
 	var ctxmwInit, ctxmwHandler uint64
-	ctxmw := func(next http.Handler) http.Handler {
+	ctxmw := func(next Handler) Handler {
 		ctxmwInit++
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			ctxmwHandler++
-			ctx := r.Context()
 			ctx = context.WithValue(ctx, ctxKey{"count.ctxmwHandler"}, ctxmwHandler)
-			r = r.WithContext(ctx)
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
 	var inCtxmwInit, inCtxmwHandler uint64
-	inCtxmw := func(next http.Handler) http.Handler {
+	inCtxmw := func(next Handler) Handler {
 		inCtxmwInit++
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			inCtxmwHandler++
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
 	r := NewRouter()
 	r.Use(stdmw)
 	r.Use(ctxmw)
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/ping" {
-				w.Write([]byte("pong"))
+	r.Use(func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			if string(rc.Request.URI().Path()) == "/ping" {
+				rc.Write([]byte("pong"))
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	})
 
 	var handlerCount uint64
 
-	r.With(inCtxmw).Get("/", func(w http.ResponseWriter, r *http.Request) {
+	r.With(inCtxmw).Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		handlerCount++
-		ctx := r.Context()
+
 		ctxmwHandlerCount := ctx.Value(ctxKey{"count.ctxmwHandler"}).(uint64)
-		w.Write([]byte(fmt.Sprintf("inits:%d reqs:%d ctxValue:%d", ctxmwInit, handlerCount, ctxmwHandlerCount)))
-	})
+		rc.Write([]byte(fmt.Sprintf("inits:%d reqs:%d ctxValue:%d", ctxmwInit, handlerCount, ctxmwHandlerCount)))
+	}))
 
-	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("wooot"))
-	})
+	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("wooot"))
+	}))
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	testRequest(t, ts, "GET", "/", nil)
@@ -686,38 +714,38 @@ func TestMuxMiddlewareStack(t *testing.T) {
 func TestMuxRouteGroups(t *testing.T) {
 	var stdmwInit, stdmwHandler uint64
 
-	stdmw := func(next http.Handler) http.Handler {
+	stdmw := func(next Handler) Handler {
 		stdmwInit++
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			stdmwHandler++
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
 	var stdmwInit2, stdmwHandler2 uint64
-	stdmw2 := func(next http.Handler) http.Handler {
+	stdmw2 := func(next Handler) Handler {
 		stdmwInit2++
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			stdmwHandler2++
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
 	r := NewRouter()
 	r.Group(func(r Router) {
 		r.Use(stdmw)
-		r.Get("/group", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("root group"))
-		})
+		r.Get("/group", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("root group"))
+		}))
 	})
 	r.Group(func(r Router) {
 		r.Use(stdmw2)
-		r.Get("/group2", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("root group2"))
-		})
+		r.Get("/group2", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("root group2"))
+		}))
 	})
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	// GET /group
@@ -742,7 +770,7 @@ func TestMuxRouteGroups(t *testing.T) {
 func TestMuxBig(t *testing.T) {
 	r := bigMux()
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	var body, expected string
@@ -793,7 +821,7 @@ func TestMuxBig(t *testing.T) {
 		t.Fatalf("got '%s'", body)
 	}
 	_, body = testRequest(t, ts, "GET", "/folders", nil)
-	if body != "404 page not found\n" {
+	if body != "404 page not found" {
 		t.Fatalf("got '%s'", body)
 	}
 	_, body = testRequest(t, ts, "GET", "/folders/", nil)
@@ -805,7 +833,7 @@ func TestMuxBig(t *testing.T) {
 		t.Fatalf("got '%s'", body)
 	}
 	_, body = testRequest(t, ts, "GET", "/folders/nothing", nil)
-	if body != "404 page not found\n" {
+	if body != "404 page not found" {
 		t.Fatalf("got '%s'", body)
 	}
 }
@@ -815,135 +843,135 @@ func bigMux() Router {
 	var sr3 *Mux
 	// var sr1, sr2, sr3, sr4, sr5, sr6 *Mux
 	r = NewRouter()
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), ctxKey{"requestID"}, "1")
-			next.ServeHTTP(w, r.WithContext(ctx))
+	r.Use(func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			ctx = context.WithValue(ctx, ctxKey{"requestID"}, "1")
+			next.ServeHTTP(ctx, rc)
 		})
 	})
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
-		})
-	})
-	r.Group(func(r Router) {
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				ctx := context.WithValue(r.Context(), ctxKey{"session.user"}, "anonymous")
-				next.ServeHTTP(w, r.WithContext(ctx))
-			})
-		})
-		r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("fav"))
-		})
-		r.Get("/hubs/{hubID}/view", func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			s := fmt.Sprintf("/hubs/%s/view reqid:%s session:%s", URLParam(r, "hubID"),
-				ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-			w.Write([]byte(s))
-		})
-		r.Get("/hubs/{hubID}/view/*", func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			s := fmt.Sprintf("/hubs/%s/view/%s reqid:%s session:%s", URLParamFromCtx(ctx, "hubID"),
-				URLParam(r, "*"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-			w.Write([]byte(s))
-		})
-		r.Post("/hubs/{hubSlug}/view/*", func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			s := fmt.Sprintf("/hubs/%s/view/%s reqid:%s session:%s", URLParamFromCtx(ctx, "hubSlug"),
-				URLParam(r, "*"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-			w.Write([]byte(s))
+	r.Use(func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			next.ServeHTTP(ctx, rc)
 		})
 	})
 	r.Group(func(r Router) {
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				ctx := context.WithValue(r.Context(), ctxKey{"session.user"}, "elvis")
-				next.ServeHTTP(w, r.WithContext(ctx))
+		r.Use(func(next Handler) Handler {
+			return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+				ctx = context.WithValue(ctx, ctxKey{"session.user"}, "anonymous")
+				next.ServeHTTP(ctx, rc)
 			})
 		})
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			s := fmt.Sprintf("/ reqid:%s session:%s", ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-			w.Write([]byte(s))
-		})
-		r.Get("/suggestions", func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			s := fmt.Sprintf("/suggestions reqid:%s session:%s", ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-			w.Write([]byte(s))
-		})
+		r.Get("/favicon.ico", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("fav"))
+		}))
+		r.Get("/hubs/{hubID}/view", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 
-		r.Get("/woot/{wootID}/*", func(w http.ResponseWriter, r *http.Request) {
-			s := fmt.Sprintf("/woot/%s/%s", URLParam(r, "wootID"), URLParam(r, "*"))
-			w.Write([]byte(s))
+			s := fmt.Sprintf("/hubs/%s/view reqid:%s session:%s", URLParam(rc, "hubID"),
+				ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
+			rc.Write([]byte(s))
+		}))
+		r.Get("/hubs/{hubID}/view/*", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+			s := fmt.Sprintf("/hubs/%s/view/%s reqid:%s session:%s", URLParamFromCtx(rc, "hubID"),
+				URLParam(rc, "*"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
+			rc.Write([]byte(s))
+		}))
+		r.Post("/hubs/{hubSlug}/view/*", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+			s := fmt.Sprintf("/hubs/%s/view/%s reqid:%s session:%s", URLParamFromCtx(rc, "hubSlug"),
+				URLParam(rc, "*"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
+			rc.Write([]byte(s))
+		}))
+	})
+	r.Group(func(r Router) {
+		r.Use(func(next Handler) Handler {
+			return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+				ctx = context.WithValue(ctx, ctxKey{"session.user"}, "elvis")
+				next.ServeHTTP(ctx, rc)
+			})
 		})
+		r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+			s := fmt.Sprintf("/ reqid:%s session:%s", ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
+			rc.Write([]byte(s))
+		}))
+		r.Get("/suggestions", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+			s := fmt.Sprintf("/suggestions reqid:%s session:%s", ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
+			rc.Write([]byte(s))
+		}))
+
+		r.Get("/woot/{wootID}/*", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			s := fmt.Sprintf("/woot/%s/%s", URLParam(rc, "wootID"), URLParam(rc, "*"))
+			rc.Write([]byte(s))
+		}))
 
 		r.Route("/hubs", func(r Router) {
 			_ = r.(*Mux) // sr1
 			r.Route("/{hubID}", func(r Router) {
 				_ = r.(*Mux) // sr2
-				r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-					ctx := r.Context()
+				r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
 					s := fmt.Sprintf("/hubs/%s reqid:%s session:%s",
-						URLParam(r, "hubID"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-					w.Write([]byte(s))
-				})
-				r.Get("/touch", func(w http.ResponseWriter, r *http.Request) {
-					ctx := r.Context()
-					s := fmt.Sprintf("/hubs/%s/touch reqid:%s session:%s", URLParam(r, "hubID"),
+						URLParam(rc, "hubID"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
+					rc.Write([]byte(s))
+				}))
+				r.Get("/touch", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+					s := fmt.Sprintf("/hubs/%s/touch reqid:%s session:%s", URLParam(rc, "hubID"),
 						ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-					w.Write([]byte(s))
-				})
+					rc.Write([]byte(s))
+				}))
 
 				sr3 = NewRouter()
-				sr3.Get("/", func(w http.ResponseWriter, r *http.Request) {
-					ctx := r.Context()
-					s := fmt.Sprintf("/hubs/%s/webhooks reqid:%s session:%s", URLParam(r, "hubID"),
+				sr3.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+					s := fmt.Sprintf("/hubs/%s/webhooks reqid:%s session:%s", URLParam(rc, "hubID"),
 						ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-					w.Write([]byte(s))
-				})
+					rc.Write([]byte(s))
+				}))
 				sr3.Route("/{webhookID}", func(r Router) {
 					_ = r.(*Mux) // sr4
-					r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-						ctx := r.Context()
-						s := fmt.Sprintf("/hubs/%s/webhooks/%s reqid:%s session:%s", URLParam(r, "hubID"),
-							URLParam(r, "webhookID"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-						w.Write([]byte(s))
-					})
+					r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+						s := fmt.Sprintf("/hubs/%s/webhooks/%s reqid:%s session:%s", URLParam(rc, "hubID"),
+							URLParam(rc, "webhookID"), ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
+						rc.Write([]byte(s))
+					}))
 				})
 
-				r.Mount("/webhooks", Chain(func(next http.Handler) http.Handler {
-					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-						next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{"hook"}, true)))
+				r.Mount("/webhooks", Chain(func(next Handler) Handler {
+					return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+						next.ServeHTTP(context.WithValue(ctx, ctxKey{"hook"}, true), rc)
 					})
 				}).Handler(sr3))
 
 				r.Route("/posts", func(r Router) {
 					_ = r.(*Mux) // sr5
-					r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-						ctx := r.Context()
-						s := fmt.Sprintf("/hubs/%s/posts reqid:%s session:%s", URLParam(r, "hubID"),
+					r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
+						s := fmt.Sprintf("/hubs/%s/posts reqid:%s session:%s", URLParam(rc, "hubID"),
 							ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-						w.Write([]byte(s))
-					})
+						rc.Write([]byte(s))
+					}))
 				})
 			})
 		})
 
 		r.Route("/folders/", func(r Router) {
 			_ = r.(*Mux) // sr6
-			r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-				ctx := r.Context()
+			r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
 				s := fmt.Sprintf("/folders/ reqid:%s session:%s",
 					ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-				w.Write([]byte(s))
-			})
-			r.Get("/public", func(w http.ResponseWriter, r *http.Request) {
-				ctx := r.Context()
+				rc.Write([]byte(s))
+			}))
+			r.Get("/public", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
 				s := fmt.Sprintf("/folders/public reqid:%s session:%s",
 					ctx.Value(ctxKey{"requestID"}), ctx.Value(ctxKey{"session.user"}))
-				w.Write([]byte(s))
-			})
+				rc.Write([]byte(s))
+			}))
 		})
 	})
 
@@ -951,20 +979,20 @@ func bigMux() Router {
 }
 
 func TestMuxSubroutesBasic(t *testing.T) {
-	hIndex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("index"))
+	hIndex := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("index"))
 	})
-	hArticlesList := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("articles-list"))
+	hArticlesList := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("articles-list"))
 	})
-	hSearchArticles := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("search-articles"))
+	hSearchArticles := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("search-articles"))
 	})
-	hGetArticle := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(fmt.Sprintf("get-article:%s", URLParam(r, "id"))))
+	hGetArticle := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte(fmt.Sprintf("get-article:%s", URLParam(rc, "id"))))
 	})
-	hSyncArticle := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(fmt.Sprintf("sync-article:%s", URLParam(r, "id"))))
+	hSyncArticle := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte(fmt.Sprintf("sync-article:%s", URLParam(rc, "id"))))
 	})
 
 	r := NewRouter()
@@ -999,7 +1027,7 @@ func TestMuxSubroutesBasic(t *testing.T) {
 	// log.Println("~~~~~~~~~")
 	// log.Println("~~~~~~~~~")
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	var body, expected string
@@ -1032,20 +1060,20 @@ func TestMuxSubroutesBasic(t *testing.T) {
 }
 
 func TestMuxSubroutes(t *testing.T) {
-	hHubView1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hub1"))
+	hHubView1 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("hub1"))
 	})
-	hHubView2 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hub2"))
+	hHubView2 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("hub2"))
 	})
-	hHubView3 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hub3"))
+	hHubView3 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("hub3"))
 	})
-	hAccountView1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("account1"))
+	hAccountView1 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("account1"))
 	})
-	hAccountView2 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("account2"))
+	hAccountView2 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("account2"))
 	})
 
 	r := NewRouter()
@@ -1055,9 +1083,9 @@ func TestMuxSubroutes(t *testing.T) {
 	sr := NewRouter()
 	sr.Get("/", hHubView3)
 	r.Mount("/hubs/{hubID}/users", sr)
-	r.Get("/hubs/{hubID}/users/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hub3 override"))
-	})
+	r.Get("/hubs/{hubID}/users/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("hub3 override"))
+	}))
 
 	sr3 := NewRouter()
 	sr3.Get("/", hAccountView1)
@@ -1075,7 +1103,7 @@ func TestMuxSubroutes(t *testing.T) {
 	// sr2.Mount("/", sr3)
 	// r.Mount("/accounts/{accountID}", sr2)
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	var body, expected string
@@ -1113,18 +1141,18 @@ func TestMuxSubroutes(t *testing.T) {
 
 	// Test that we're building the routingPatterns properly
 	router := r
-	req, _ := http.NewRequest("GET", "/accounts/44/hi", nil)
+	rc := fasthttp.RequestCtx{}
+	rc.Request.Header.SetMethod("GET")
+	rc.Request.SetRequestURI("/accounts/44/hi")
 
 	rctx := NewRouteContext()
-	req = req.WithContext(context.WithValue(req.Context(), RouteCtxKey, rctx))
+	rc.SetUserValue(routeUserValueKey, rctx)
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	router.ServeHTTP(context.Background(), &rc)
 
-	body = w.Body.String()
 	expected = "account2"
-	if body != expected {
-		t.Fatalf("expected:%s got:%s", expected, body)
+	if string(rc.Response.Body()) != expected {
+		t.Fatalf("expected:%s got:%s", expected, string(rc.Response.Body()))
 	}
 
 	routePatterns := rctx.RoutePatterns
@@ -1147,23 +1175,24 @@ func TestMuxSubroutes(t *testing.T) {
 }
 
 func TestSingleHandler(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := URLParam(r, "name")
-		w.Write([]byte("hi " + name))
+	h := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		name := URLParam(rc, "name")
+		rc.Write([]byte("hi " + name))
 	})
 
-	r, _ := http.NewRequest("GET", "/", nil)
+	rc := fasthttp.RequestCtx{}
+	rc.Request.Header.SetMethod("GET")
+	rc.Request.SetRequestURI("/")
+
 	rctx := NewRouteContext()
-	r = r.WithContext(context.WithValue(r.Context(), RouteCtxKey, rctx))
+	rc.SetUserValue(routeUserValueKey, rctx)
 	rctx.URLParams.Add("name", "joe")
 
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
+	h.ServeHTTP(context.Background(), &rc)
 
-	body := w.Body.String()
 	expected := "hi joe"
-	if body != expected {
-		t.Fatalf("expected:%s got:%s", expected, body)
+	if string(rc.Response.Body()) != expected {
+		t.Fatalf("expected:%s got:%s", expected, string(rc.Response.Body()))
 	}
 }
 
@@ -1183,8 +1212,8 @@ func TestSingleHandler(t *testing.T) {
 // 	var r Router = NewRouter()
 //
 // 	var r2 Router = NewACLMux() //NewRouter()
-// 	r2.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-// 		w.Write([]byte("hi"))
+// 	r2.Get("/hi", func(ctx context.Context, rc *fasthttp.RequestCtx) {
+// 		rc.Write([]byte("hi"))
 // 	})
 //
 // 	r.Mount("/", r2)
@@ -1192,15 +1221,15 @@ func TestSingleHandler(t *testing.T) {
 
 func TestServeHTTPExistingContext(t *testing.T) {
 	r := NewRouter()
-	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-		s, _ := r.Context().Value(ctxKey{"testCtx"}).(string)
-		w.Write([]byte(s))
-	})
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		s, _ := r.Context().Value(ctxKey{"testCtx"}).(string)
-		w.WriteHeader(404)
-		w.Write([]byte(s))
-	})
+	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		s, _ := ctx.Value(ctxKey{"testCtx"}).(string)
+		rc.Write([]byte(s))
+	}))
+	r.NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		s, _ := ctx.Value(ctxKey{"testCtx"}).(string)
+		rc.Response.SetStatusCode(404)
+		rc.Write([]byte(s))
+	}))
 
 	testcases := []struct {
 		Method         string
@@ -1226,73 +1255,68 @@ func TestServeHTTPExistingContext(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		resp := httptest.NewRecorder()
-		req, err := http.NewRequest(tc.Method, tc.Path, nil)
-		if err != nil {
-			t.Fatalf("%v", err)
+		rc := fasthttp.RequestCtx{}
+		rc.Request.SetRequestURI(tc.Path)
+		rc.Request.Header.SetMethod(tc.Method)
+
+		r.ServeHTTP(tc.Ctx, &rc)
+
+		if rc.Response.StatusCode() != tc.ExpectedStatus {
+			t.Fatalf("%v != %v", tc.ExpectedStatus, rc.Response.StatusCode())
 		}
-		req = req.WithContext(tc.Ctx)
-		r.ServeHTTP(resp, req)
-		b, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-		if resp.Code != tc.ExpectedStatus {
-			t.Fatalf("%v != %v", tc.ExpectedStatus, resp.Code)
-		}
-		if string(b) != tc.ExpectedBody {
-			t.Fatalf("%s != %s", tc.ExpectedBody, b)
+		if string(rc.Response.Body()) != tc.ExpectedBody {
+			t.Fatalf("%s != %s", tc.ExpectedBody, string(rc.Response.Body()))
 		}
 	}
 }
 
 func TestNestedGroups(t *testing.T) {
-	handlerPrintCounter := func(w http.ResponseWriter, r *http.Request) {
-		counter, _ := r.Context().Value(ctxKey{"counter"}).(int)
-		w.Write([]byte(fmt.Sprintf("%v", counter)))
+	handlerPrintCounter := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		counter, _ := ctx.Value(ctxKey{"counter"}).(int)
+		rc.Write([]byte(fmt.Sprintf("%v", counter)))
 	}
 
-	mwIncreaseCounter := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
+	mwIncreaseCounter := func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+
 			counter, _ := ctx.Value(ctxKey{"counter"}).(int)
 			counter++
 			ctx = context.WithValue(ctx, ctxKey{"counter"}, counter)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
 	// Each route represents value of its counter (number of applied middlewares).
 	r := NewRouter() // counter == 0
-	r.Get("/0", handlerPrintCounter)
+	r.Get("/0", HandlerFunc(handlerPrintCounter))
 	r.Group(func(r Router) {
 		r.Use(mwIncreaseCounter) // counter == 1
-		r.Get("/1", handlerPrintCounter)
+		r.Get("/1", HandlerFunc(handlerPrintCounter))
 
 		// r.Handle(GET, "/2", Chain(mwIncreaseCounter).HandlerFunc(handlerPrintCounter))
-		r.With(mwIncreaseCounter).Get("/2", handlerPrintCounter)
+		r.With(mwIncreaseCounter).Get("/2", HandlerFunc(handlerPrintCounter))
 
 		r.Group(func(r Router) {
 			r.Use(mwIncreaseCounter, mwIncreaseCounter) // counter == 3
-			r.Get("/3", handlerPrintCounter)
+			r.Get("/3", HandlerFunc(handlerPrintCounter))
 		})
 		r.Route("/", func(r Router) {
 			r.Use(mwIncreaseCounter, mwIncreaseCounter) // counter == 3
 
 			// r.Handle(GET, "/4", Chain(mwIncreaseCounter).HandlerFunc(handlerPrintCounter))
-			r.With(mwIncreaseCounter).Get("/4", handlerPrintCounter)
+			r.With(mwIncreaseCounter).Get("/4", HandlerFunc(handlerPrintCounter))
 
 			r.Group(func(r Router) {
 				r.Use(mwIncreaseCounter, mwIncreaseCounter) // counter == 5
-				r.Get("/5", handlerPrintCounter)
+				r.Get("/5", HandlerFunc(handlerPrintCounter))
 				// r.Handle(GET, "/6", Chain(mwIncreaseCounter).HandlerFunc(handlerPrintCounter))
-				r.With(mwIncreaseCounter).Get("/6", handlerPrintCounter)
+				r.With(mwIncreaseCounter).Get("/6", HandlerFunc(handlerPrintCounter))
 
 			})
 		})
 	})
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	for _, route := range []string{"0", "1", "2", "3", "4", "5", "6"} {
@@ -1303,13 +1327,13 @@ func TestNestedGroups(t *testing.T) {
 }
 
 func TestMiddlewarePanicOnLateUse(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hello\n"))
+	handler := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("hello\n"))
 	}
 
-	mw := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
+	mw := func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			next.ServeHTTP(ctx, rc)
 		})
 	}
 
@@ -1320,12 +1344,12 @@ func TestMiddlewarePanicOnLateUse(t *testing.T) {
 	}()
 
 	r := NewRouter()
-	r.Get("/", handler)
+	r.Get("/", HandlerFunc(handler))
 	r.Use(mw) // Too late to apply middleware, we're expecting panic().
 }
 
 func TestMountingExistingPath(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler := func(ctx context.Context, rc *fasthttp.RequestCtx) {}
 
 	defer func() {
 		if recover() == nil {
@@ -1334,31 +1358,31 @@ func TestMountingExistingPath(t *testing.T) {
 	}()
 
 	r := NewRouter()
-	r.Get("/", handler)
-	r.Mount("/hi", http.HandlerFunc(handler))
-	r.Mount("/hi", http.HandlerFunc(handler))
+	r.Get("/", HandlerFunc(handler))
+	r.Mount("/hi", HandlerFunc(handler))
+	r.Mount("/hi", HandlerFunc(handler))
 }
 
 func TestMountingSimilarPattern(t *testing.T) {
 	r := NewRouter()
-	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("bye"))
-	})
+	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("bye"))
+	}))
 
 	r2 := NewRouter()
-	r2.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("foobar"))
-	})
+	r2.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("foobar"))
+	}))
 
 	r3 := NewRouter()
-	r3.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("foo"))
-	})
+	r3.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("foo"))
+	}))
 
 	r.Mount("/foobar", r2)
 	r.Mount("/foo", r3)
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -1368,14 +1392,14 @@ func TestMountingSimilarPattern(t *testing.T) {
 
 func TestMuxEmptyParams(t *testing.T) {
 	r := NewRouter()
-	r.Get(`/users/{x}/{y}/{z}`, func(w http.ResponseWriter, r *http.Request) {
-		x := URLParam(r, "x")
-		y := URLParam(r, "y")
-		z := URLParam(r, "z")
-		w.Write([]byte(fmt.Sprintf("%s-%s-%s", x, y, z)))
-	})
+	r.Get(`/users/{x}/{y}/{z}`, HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		x := URLParam(rc, "x")
+		y := URLParam(rc, "y")
+		z := URLParam(rc, "z")
+		rc.Write([]byte(fmt.Sprintf("%s-%s-%s", x, y, z)))
+	}))
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/users/a/b/c", nil); body != "a-b-c" {
@@ -1388,16 +1412,16 @@ func TestMuxEmptyParams(t *testing.T) {
 
 func TestMuxMissingParams(t *testing.T) {
 	r := NewRouter()
-	r.Get(`/user/{userId:\d+}`, func(w http.ResponseWriter, r *http.Request) {
-		userID := URLParam(r, "userId")
-		w.Write([]byte(fmt.Sprintf("userId = '%s'", userID)))
-	})
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(404)
-		w.Write([]byte("nothing here"))
-	})
+	r.Get(`/user/{userId:\d+}`, HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		userID := URLParam(rc, "userId")
+		rc.Write([]byte(fmt.Sprintf("userId = '%s'", userID)))
+	}))
+	r.NotFound(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(404)
+		rc.Write([]byte("nothing here"))
+	}))
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/user/123", nil); body != "userId = '123'" {
@@ -1409,7 +1433,7 @@ func TestMuxMissingParams(t *testing.T) {
 }
 
 func TestMuxWildcardRoute(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler := func(ctx context.Context, rc *fasthttp.RequestCtx) {}
 
 	defer func() {
 		if recover() == nil {
@@ -1418,11 +1442,11 @@ func TestMuxWildcardRoute(t *testing.T) {
 	}()
 
 	r := NewRouter()
-	r.Get("/*/wildcard/must/be/at/end", handler)
+	r.Get("/*/wildcard/must/be/at/end", HandlerFunc(handler))
 }
 
 func TestMuxWildcardRouteCheckTwo(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {}
+	handler := func(ctx context.Context, rc *fasthttp.RequestCtx) {}
 
 	defer func() {
 		if recover() == nil {
@@ -1431,18 +1455,18 @@ func TestMuxWildcardRouteCheckTwo(t *testing.T) {
 	}()
 
 	r := NewRouter()
-	r.Get("/*/wildcard/{must}/be/at/end", handler)
+	r.Get("/*/wildcard/{must}/be/at/end", HandlerFunc(handler))
 }
 
 func TestMuxRegexp(t *testing.T) {
 	r := NewRouter()
 	r.Route("/{param:[0-9]+}/test", func(r Router) {
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(fmt.Sprintf("Hi: %s", URLParam(r, "param"))))
-		})
+		r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte(fmt.Sprintf("Hi: %s", URLParam(rc, "param"))))
+		}))
 	})
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "//test", nil); body != "Hi: " {
@@ -1452,10 +1476,10 @@ func TestMuxRegexp(t *testing.T) {
 
 func TestMuxRegexp2(t *testing.T) {
 	r := NewRouter()
-	r.Get("/foo-{suffix:[a-z]{2,3}}.json", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(URLParam(r, "suffix")))
-	})
-	ts := httptest.NewServer(r)
+	r.Get("/foo-{suffix:[a-z]{2,3}}.json", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte(URLParam(rc, "suffix")))
+	}))
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/foo-.json", nil); body != "" {
@@ -1468,29 +1492,29 @@ func TestMuxRegexp2(t *testing.T) {
 
 func TestMuxRegexp3(t *testing.T) {
 	r := NewRouter()
-	r.Get("/one/{firstId:[a-z0-9-]+}/{secondId:[a-z]+}/first", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("first"))
-	})
-	r.Get("/one/{firstId:[a-z0-9-_]+}/{secondId:[0-9]+}/second", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("second"))
-	})
-	r.Delete("/one/{firstId:[a-z0-9-_]+}/{secondId:[0-9]+}/second", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("third"))
-	})
+	r.Get("/one/{firstId:[a-z0-9-]+}/{secondId:[a-z]+}/first", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("first"))
+	}))
+	r.Get("/one/{firstId:[a-z0-9-_]+}/{secondId:[0-9]+}/second", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("second"))
+	}))
+	r.Delete("/one/{firstId:[a-z0-9-_]+}/{secondId:[0-9]+}/second", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("third"))
+	}))
 
 	r.Route("/one", func(r Router) {
-		r.Get("/{dns:[a-z-0-9_]+}", func(writer http.ResponseWriter, request *http.Request) {
-			writer.Write([]byte("_"))
-		})
-		r.Get("/{dns:[a-z-0-9_]+}/info", func(writer http.ResponseWriter, request *http.Request) {
-			writer.Write([]byte("_"))
-		})
-		r.Delete("/{id:[0-9]+}", func(writer http.ResponseWriter, request *http.Request) {
-			writer.Write([]byte("forth"))
-		})
+		r.Get("/{dns:[a-z-0-9_]+}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("_"))
+		}))
+		r.Get("/{dns:[a-z-0-9_]+}/info", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("_"))
+		}))
+		r.Delete("/{id:[0-9]+}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("forth"))
+		}))
 	})
 
-	ts := httptest.NewServer(r)
+	ts := newTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/one/hello/peter/first", nil); body != "first" {
@@ -1509,12 +1533,12 @@ func TestMuxRegexp3(t *testing.T) {
 
 func TestMuxContextIsThreadSafe(t *testing.T) {
 	router := NewRouter()
-	router.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 1*time.Millisecond)
+	router.Get("/{id}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		ctx, cancel := context.WithTimeout(ctx, 1*time.Millisecond)
 		defer cancel()
 
 		<-ctx.Done()
-	})
+	}))
 
 	wg := sync.WaitGroup{}
 
@@ -1523,19 +1547,16 @@ func TestMuxContextIsThreadSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10000; j++ {
-				w := httptest.NewRecorder()
-				r, err := http.NewRequest("GET", "/ok", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				rc := fasthttp.RequestCtx{}
+				rc.Request.Header.SetMethod("GET")
+				rc.Request.SetRequestURI("/ok")
 
-				ctx, cancel := context.WithCancel(r.Context())
-				r = r.WithContext(ctx)
+				ctx, cancel := context.WithCancel(context.Background())
 
 				go func() {
 					cancel()
 				}()
-				router.ServeHTTP(w, r)
+				router.ServeHTTP(ctx, &rc)
 			}
 		}()
 	}
@@ -1544,37 +1565,37 @@ func TestMuxContextIsThreadSafe(t *testing.T) {
 
 func TestEscapedURLParams(t *testing.T) {
 	m := NewRouter()
-	m.Get("/api/{identifier}/{region}/{size}/{rotation}/*", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		rctx := RouteContext(r.Context())
+	m.Get("/api/{identifier}/{region}/{size}/{rotation}/*", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(200)
+		rctx := RouteContext(rc)
 		if rctx == nil {
 			t.Error("no context")
 			return
 		}
-		identifier := URLParam(r, "identifier")
+		identifier := URLParam(rc, "identifier")
 		if identifier != "http:%2f%2fexample.com%2fimage.png" {
 			t.Errorf("identifier path parameter incorrect %s", identifier)
 			return
 		}
-		region := URLParam(r, "region")
+		region := URLParam(rc, "region")
 		if region != "full" {
 			t.Errorf("region path parameter incorrect %s", region)
 			return
 		}
-		size := URLParam(r, "size")
+		size := URLParam(rc, "size")
 		if size != "max" {
 			t.Errorf("size path parameter incorrect %s", size)
 			return
 		}
-		rotation := URLParam(r, "rotation")
+		rotation := URLParam(rc, "rotation")
 		if rotation != "0" {
 			t.Errorf("rotation path parameter incorrect %s", rotation)
 			return
 		}
-		w.Write([]byte("success"))
-	})
+		rc.Write([]byte("success"))
+	}))
 
-	ts := httptest.NewServer(m)
+	ts := newTestServer(m)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/api/http:%2f%2fexample.com%2fimage.png/full/max/0/color.png", nil); body != "success" {
@@ -1584,27 +1605,27 @@ func TestEscapedURLParams(t *testing.T) {
 
 func TestMuxMatch(t *testing.T) {
 	r := NewRouter()
-	r.Get("/hi", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Test", "yes")
-		w.Write([]byte("bye"))
-	})
+	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.Header.Set("X-Test", "yes")
+		rc.Write([]byte("bye"))
+	}))
 	r.Route("/articles", func(r Router) {
-		r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
-			id := URLParam(r, "id")
-			w.Header().Set("X-Article", id)
-			w.Write([]byte("article:" + id))
-		})
+		r.Get("/{id}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			id := URLParam(rc, "id")
+			rc.Response.Header.Set("X-Article", id)
+			rc.Write([]byte("article:" + id))
+		}))
 	})
 	r.Route("/users", func(r Router) {
-		r.Head("/{id}", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-User", "-")
-			w.Write([]byte("user"))
-		})
-		r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
-			id := URLParam(r, "id")
-			w.Header().Set("X-User", id)
-			w.Write([]byte("user:" + id))
-		})
+		r.Head("/{id}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Response.Header.Set("X-User", "-")
+			rc.Write([]byte("user"))
+		}))
+		r.Get("/{id}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			id := URLParam(rc, "id")
+			rc.Response.Header.Set("X-User", id)
+			rc.Write([]byte("user:" + id))
+		}))
 	})
 
 	tctx := NewRouteContext()
@@ -1620,30 +1641,7 @@ func TestMuxMatch(t *testing.T) {
 	}
 }
 
-func TestServerBaseContext(t *testing.T) {
-	r := NewRouter()
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		baseYes := r.Context().Value(ctxKey{"base"}).(string)
-		if _, ok := r.Context().Value(http.ServerContextKey).(*http.Server); !ok {
-			panic("missing server context")
-		}
-		if _, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); !ok {
-			panic("missing local addr context")
-		}
-		w.Write([]byte(baseYes))
-	})
-
-	// Setup http Server with a base context
-	ctx := context.WithValue(context.Background(), ctxKey{"base"}, "yes")
-	ts := httptest.NewServer(ServerBaseContext(ctx, r))
-	defer ts.Close()
-
-	if _, body := testRequest(t, ts, "GET", "/", nil); body != "yes" {
-		t.Fatalf(body)
-	}
-}
-
-func testRequest(t *testing.T, ts *httptest.Server, method, path string, body io.Reader) (*http.Response, string) {
+func testRequest(t *testing.T, ts *testServer, method, path string, body io.Reader) (*http.Response, string) {
 	req, err := http.NewRequest(method, ts.URL+path, body)
 	if err != nil {
 		t.Fatal(err)
@@ -1666,11 +1664,13 @@ func testRequest(t *testing.T, ts *httptest.Server, method, path string, body io
 	return resp, string(respBody)
 }
 
-func testHandler(t *testing.T, h http.Handler, method, path string, body io.Reader) (*http.Response, string) {
-	r, _ := http.NewRequest(method, path, body)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	return w.Result(), w.Body.String()
+func testHandler(h Handler, method, path string) string {
+	rc := fasthttp.RequestCtx{}
+	rc.Request.Header.SetMethod(method)
+	rc.Request.SetRequestURI(path)
+
+	h.ServeHTTP(context.Background(), &rc)
+	return string(rc.Response.Body())
 }
 
 type testFileSystem struct {
@@ -1729,12 +1729,12 @@ func (k ctxKey) String() string {
 }
 
 func BenchmarkMux(b *testing.B) {
-	h1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	h2 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	h3 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	h4 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	h5 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	h6 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	h1 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {})
+	h2 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {})
+	h3 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {})
+	h4 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {})
+	h5 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {})
+	h6 := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {})
 
 	mx := NewRouter()
 	mx.Get("/", h1)
@@ -1763,14 +1763,15 @@ func BenchmarkMux(b *testing.B) {
 
 	for _, path := range routes {
 		b.Run("route:"+path, func(b *testing.B) {
-			w := httptest.NewRecorder()
-			r, _ := http.NewRequest("GET", path, nil)
+			rc := fasthttp.RequestCtx{}
+			rc.Request.Header.SetMethod("GET")
+			rc.Request.SetRequestURI(path)
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				mx.ServeHTTP(w, r)
+				mx.ServeHTTP(context.Background(), &rc)
 			}
 		})
 	}
