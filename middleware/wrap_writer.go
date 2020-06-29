@@ -1,3 +1,6 @@
+// TODO convert middleware to fasthttp.
+// +build ignore
+
 package middleware
 
 // The original work was derived from Goji's middleware, source:

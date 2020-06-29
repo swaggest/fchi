@@ -1,39 +1,43 @@
-package chi
+package fchi
 
-import "net/http"
+import (
+	"context"
+
+	"github.com/valyala/fasthttp"
+)
 
 // Chain returns a Middlewares type from a slice of middleware handlers.
-func Chain(middlewares ...func(http.Handler) http.Handler) Middlewares {
+func Chain(middlewares ...func(Handler) Handler) Middlewares {
 	return Middlewares(middlewares)
 }
 
-// Handler builds and returns a http.Handler from the chain of middlewares,
-// with `h http.Handler` as the final handler.
-func (mws Middlewares) Handler(h http.Handler) http.Handler {
+// Handler builds and returns a Handler from the chain of middlewares,
+// with `h Handler` as the final handler.
+func (mws Middlewares) Handler(h Handler) Handler {
 	return &ChainHandler{mws, h, chain(mws, h)}
 }
 
-// HandlerFunc builds and returns a http.Handler from the chain of middlewares,
-// with `h http.Handler` as the final handler.
-func (mws Middlewares) HandlerFunc(h http.HandlerFunc) http.Handler {
+// HandlerFunc builds and returns a Handler from the chain of middlewares,
+// with `h Handler` as the final handler.
+func (mws Middlewares) HandlerFunc(h HandlerFunc) Handler {
 	return &ChainHandler{mws, h, chain(mws, h)}
 }
 
-// ChainHandler is a http.Handler with support for handler composition and
+// ChainHandler is a Handler with support for handler composition and
 // execution.
 type ChainHandler struct {
 	Middlewares Middlewares
-	Endpoint    http.Handler
-	chain       http.Handler
+	Endpoint    Handler
+	chain       Handler
 }
 
-func (c *ChainHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	c.chain.ServeHTTP(w, r)
+func (c *ChainHandler) ServeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
+	c.chain.ServeHTTP(ctx, rc)
 }
 
-// chain builds a http.Handler composed of an inline middleware stack and endpoint
+// chain builds a Handler composed of an inline middleware stack and endpoint
 // handler in the order they are passed.
-func chain(middlewares []func(http.Handler) http.Handler, endpoint http.Handler) http.Handler {
+func chain(middlewares []func(Handler) Handler, endpoint Handler) Handler {
 	// Return ahead of time if there aren't any middlewares for the chain
 	if len(middlewares) == 0 {
 		return endpoint

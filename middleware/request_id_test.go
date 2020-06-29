@@ -1,3 +1,6 @@
+// TODO convert middleware to fasthttp.
+// +build ignore
+
 package middleware
 
 import (

@@ -1,33 +1,33 @@
 package main
 
 import (
-	"net/http"
+	"context"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/swaggest/fchi"
+	"github.com/swaggest/fchi/middleware"
+	"github.com/valyala/fasthttp"
 )
 
 func init() {
-	chi.RegisterMethod("LINK")
-	chi.RegisterMethod("UNLINK")
-	chi.RegisterMethod("WOOHOO")
+	fchi.RegisterMethod("LINK")
+	fchi.RegisterMethod("UNLINK")
+	fchi.RegisterMethod("WOOHOO")
 }
 
 func main() {
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hello world"))
-	})
-	r.MethodFunc("LINK", "/link", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("custom link method"))
-	})
-	r.MethodFunc("WOOHOO", "/woo", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("custom woohoo method"))
-	})
-	r.HandleFunc("/everything", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("capturing all standard http methods, as well as LINK, UNLINK and WOOHOO"))
-	})
-	http.ListenAndServe(":3333", r)
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("hello world"))
+	}))
+	r.Method("LINK", "/link", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("custom link method"))
+	}))
+	r.Method("WOOHOO", "/woo", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("custom woohoo method"))
+	}))
+	r.Handle("/everything", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("capturing all standard http methods, as well as LINK, UNLINK and WOOHOO"))
+	}))
+	fasthttp.ListenAndServe(":3333", fchi.RequestHandler(r))
 }

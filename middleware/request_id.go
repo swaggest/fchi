@@ -8,10 +8,12 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 // Key to use when setting the request ID.
@@ -64,18 +66,17 @@ func init() {
 // where "random" is a base62 random string that uniquely identifies this go
 // process, and where the last number is an atomically incremented request
 // counter.
-func RequestID(next http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		requestID := r.Header.Get(RequestIDHeader)
+func RequestID(next fchi.Handler) fchi.Handler {
+	fn := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		requestID := string(rc.Request.Header.Peek(RequestIDHeader))
 		if requestID == "" {
 			myid := atomic.AddUint64(&reqid, 1)
 			requestID = fmt.Sprintf("%s-%06d", prefix, myid)
 		}
 		ctx = context.WithValue(ctx, RequestIDKey, requestID)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(ctx, rc)
 	}
-	return http.HandlerFunc(fn)
+	return fchi.HandlerFunc(fn)
 }
 
 // GetReqID returns a request ID from the given context if one is present.

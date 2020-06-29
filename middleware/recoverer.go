@@ -5,12 +5,16 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"runtime/debug"
 	"strings"
+
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 // Recoverer is a middleware that recovers from panics, logs the panic (and a
@@ -18,26 +22,20 @@ import (
 // possible. Recoverer prints a request ID if one is provided.
 //
 // Alternatively, look at https://github.com/pressly/lg middleware pkgs.
-func Recoverer(next http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, r *http.Request) {
+func Recoverer(next fchi.Handler) fchi.Handler {
+	fn := func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		defer func() {
 			if rvr := recover(); rvr != nil && rvr != http.ErrAbortHandler {
+				PrintPrettyStack(rvr)
 
-				logEntry := GetLogEntry(r)
-				if logEntry != nil {
-					logEntry.Panic(rvr, debug.Stack())
-				} else {
-					PrintPrettyStack(rvr)
-				}
-
-				w.WriteHeader(http.StatusInternalServerError)
+				rc.Response.SetStatusCode(fasthttp.StatusInternalServerError)
 			}
 		}()
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(ctx, rc)
 	}
 
-	return http.HandlerFunc(fn)
+	return fchi.HandlerFunc(fn)
 }
 
 func PrintPrettyStack(rvr interface{}) {

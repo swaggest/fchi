@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"context"
-	"net/http"
 	"time"
+
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 // Timeout is a middleware that cancels ctx after a given timeout and return
@@ -30,20 +32,19 @@ import (
 // 	 w.Write([]byte("done"))
 //  })
 //
-func Timeout(timeout time.Duration) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		fn := func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+func Timeout(timeout time.Duration) func(next fchi.Handler) fchi.Handler {
+	return func(next fchi.Handler) fchi.Handler {
+		fn := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer func() {
 				cancel()
 				if ctx.Err() == context.DeadlineExceeded {
-					w.WriteHeader(http.StatusGatewayTimeout)
+					rc.SetStatusCode(fasthttp.StatusGatewayTimeout)
 				}
 			}()
 
-			r = r.WithContext(ctx)
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ctx, rc)
 		}
-		return http.HandlerFunc(fn)
+		return fchi.HandlerFunc(fn)
 	}
 }
