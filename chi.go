@@ -1,31 +1,31 @@
 //
 // Package fchi is a small, idiomatic and composable router for building HTTP services.
 //
-// chi requires Go 1.10 or newer.
+// chi requires Go 1.11 or newer.
 //
 // Example:
 //  package main
 //
 //  import (
-//  	"net/http"
+//		"context"
 //
-//  	"github.com/go-chi/chi"
-//  	"github.com/go-chi/chi/middleware"
+//  	"github.com/swaggest/fchi"
+//  	"github.com/swaggest/fchi/middleware"
+//		"github.com/valyala/fasthttp"
 //  )
 //
 //  func main() {
 //  	r := chi.NewRouter()
-//  	r.Use(middleware.Logger)
 //  	r.Use(middleware.Recoverer)
 //
-//  	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-//  		w.Write([]byte("root."))
+//  	r.Get("/", func(ctx context.Context, rc *fasthttp.RequestCtx) {
+//  		rc.Write([]byte("root."))
 //  	})
 //
-//  	http.ListenAndServe(":3333", r)
+//  	fasthttp.ListenAndServe(":3333", fchi.RequestHandler(r))
 //  }
 //
-// See github.com/go-chi/chi/_examples/ for more in-depth examples.
+// See github.com/swaggest/fchi/_examples/ for more in-depth examples.
 //
 // URL patterns allow for easy matching of path components in HTTP
 // requests. The matching components can then be accessed using
