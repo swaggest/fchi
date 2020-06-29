@@ -17,9 +17,13 @@ handlers (stdlib-only), developer productivity, and deconstructing a large syste
 parts. The core router `github.com/go-chi/chi` is quite small (less than 1000 LOC), but we've also
 included some useful/optional subpackages: [middleware](/middleware), [render](https://github.com/go-chi/render) and [docgen](https://github.com/go-chi/docgen). We hope you enjoy it too!
 
+## This Fork
+
+This fork changes `chi` implementation to work with [`github.com/valyala/fasthttp`](https://github.com/valyala/fasthttp).
+
 ## Install
 
-`go get -u github.com/go-chi/chi`
+`go get -u github.com/swaggest/fchi`
 
 
 ## Features
@@ -45,19 +49,21 @@ See [_examples/](https://github.com/go-chi/chi/blob/master/_examples/) for a var
 package main
 
 import (
-	"net/http"
+	"context"
+    "net/http"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/swaggest/fchi"
+	"github.com/swaggest/fchi/middleware"
+    "github.com/valyala/fasthttp"
 )
 
 func main() {
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("welcome"))
-	})
-	http.ListenAndServe(":3000", r)
+	r := fchi.NewRouter()
+	r.Use(middleware.NoCache)
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("welcome"))
+	}))
+	fasthttp.ListenAndServe(":3000", fchi.RequestHandler(r))
 }
 ```
 
@@ -74,17 +80,15 @@ above, they will show you all the features of chi and serve as a good form of do
 import (
   //...
   "context"
-  "github.com/go-chi/chi"
-  "github.com/go-chi/chi/middleware"
+  "github.com/swaggest/fchi"
+  "github.com/swaggest/fchi/middleware"
 )
 
 func main() {
-  r := chi.NewRouter()
+  r := fchi.NewRouter()
 
   // A good base middleware stack
   r.Use(middleware.RequestID)
-  r.Use(middleware.RealIP)
-  r.Use(middleware.Logger)
   r.Use(middleware.Recoverer)
 
   // Set a timeout value on the request context (ctx), that will signal
@@ -92,77 +96,75 @@ func main() {
   // processing should be stopped.
   r.Use(middleware.Timeout(60 * time.Second))
 
-  r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-    w.Write([]byte("hi"))
-  })
+  r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+    rc.Write([]byte("hi"))
+  }))
 
   // RESTy routes for "articles" resource
-  r.Route("/articles", func(r chi.Router) {
-    r.With(paginate).Get("/", listArticles)                           // GET /articles
-    r.With(paginate).Get("/{month}-{day}-{year}", listArticlesByDate) // GET /articles/01-16-2017
+  r.Route("/articles", func(r fchi.Router) {
+    r.With(paginate).Get("/", fchi.HandlerFunc(listArticles))                           // GET /articles
+    r.With(paginate).Get("/{month}-{day}-{year}", fchi.HandlerFunc(listArticlesByDate)) // GET /articles/01-16-2017
 
-    r.Post("/", createArticle)                                        // POST /articles
-    r.Get("/search", searchArticles)                                  // GET /articles/search
+    r.Post("/", fchi.HandlerFunc(createArticle))                                        // POST /articles
+    r.Get("/search", fchi.HandlerFunc(searchArticles))                                  // GET /articles/search
 
     // Regexp url parameters:
-    r.Get("/{articleSlug:[a-z-]+}", getArticleBySlug)                // GET /articles/home-is-toronto
+    r.Get("/{articleSlug:[a-z-]+}", fchi.HandlerFunc(getArticleBySlug))                // GET /articles/home-is-toronto
 
     // Subrouters:
-    r.Route("/{articleID}", func(r chi.Router) {
+    r.Route("/{articleID}", func(r fchi.Router) {
       r.Use(ArticleCtx)
-      r.Get("/", getArticle)                                          // GET /articles/123
-      r.Put("/", updateArticle)                                       // PUT /articles/123
-      r.Delete("/", deleteArticle)                                    // DELETE /articles/123
+      r.Get("/", fchi.HandlerFunc(getArticle))                                          // GET /articles/123
+      r.Put("/", fchi.HandlerFunc(updateArticle))                                       // PUT /articles/123
+      r.Delete("/", fchi.HandlerFunc(deleteArticle))                                    // DELETE /articles/123
     })
   })
 
   // Mount the admin sub-router
   r.Mount("/admin", adminRouter())
 
-  http.ListenAndServe(":3333", r)
+  fasthttp.ListenAndServe(":3333", fchi.RequestHandler(r))
 }
 
-func ArticleCtx(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    articleID := chi.URLParam(r, "articleID")
+func ArticleCtx(next fchi.Handler) fchi.Handler {
+  return fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+    articleID := fchi.URLParam(rc, "articleID")
     article, err := dbGetArticle(articleID)
     if err != nil {
-      http.Error(w, http.StatusText(404), 404)
+      rc.Error(http.StatusText(404), 404)
       return
     }
-    ctx := context.WithValue(r.Context(), "article", article)
-    next.ServeHTTP(w, r.WithContext(ctx))
+    ctx = context.WithValue(ctx, "article", article)
+    next.ServeHTTP(ctx, rc)
   })
 }
 
-func getArticle(w http.ResponseWriter, r *http.Request) {
-  ctx := r.Context()
+func getArticle(ctx context.Context, rc *fasthttp.RequestCtx) {
   article, ok := ctx.Value("article").(*Article)
   if !ok {
-    http.Error(w, http.StatusText(422), 422)
+    rc.Error(http.StatusText(422), 422)
     return
   }
-  w.Write([]byte(fmt.Sprintf("title:%s", article.Title)))
+  rc.Write([]byte(fmt.Sprintf("title:%s", article.Title)))
 }
 
 // A completely separate router for administrator routes
-func adminRouter() http.Handler {
+func adminRouter() fchi.Handler {
   r := chi.NewRouter()
   r.Use(AdminOnly)
-  r.Get("/", adminIndex)
-  r.Get("/accounts", adminListAccounts)
+  r.Get("/", fchi.HandlerFunc(adminIndex))
+  r.Get("/accounts", fchi.HandlerFunc(adminListAccounts))
   return r
 }
 
-func AdminOnly(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
+func AdminOnly(next fchi.Handler) fchi.Handler {
+  return fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
     perm, ok := ctx.Value("acl.permission").(YourPermissionType)
     if !ok || !perm.IsAdmin() {
-      http.Error(w, http.StatusText(403), 403)
+      rc.Error(http.StatusText(403), 403)
       return
     }
-    next.ServeHTTP(w, r)
+    next.ServeHTTP(ctx, rc)
   })
 }
 ```
@@ -171,22 +173,21 @@ func AdminOnly(next http.Handler) http.Handler {
 ## Router design
 
 chi's router is based on a kind of [Patricia Radix trie](https://en.wikipedia.org/wiki/Radix_tree).
-The router is fully compatible with `net/http`.
+The router is fully compatible with `fasthttp`.
 
 Built on top of the tree is the `Router` interface:
 
 ```go
-// Router consisting of the core routing methods used by chi's Mux,
-// using only the standard net/http.
+// Router consisting of the core routing methods used by chi's Mux.
 type Router interface {
-	http.Handler
+	fchi.Handler
 	Routes
 
 	// Use appends one or more middlewares onto the Router stack.
-	Use(middlewares ...func(http.Handler) http.Handler)
+	Use(middlewares ...func(fchi.Handler) fchi.Handler)
 
 	// With adds inline middlewares for an endpoint handler.
-	With(middlewares ...func(http.Handler) http.Handler) Router
+	With(middlewares ...func(fchi.Handler) fchi.Handler) Router
 
 	// Group adds a new inline-Router along the current routing
 	// path, with a fresh middleware stack for the inline-Router.
@@ -195,37 +196,35 @@ type Router interface {
 	// Route mounts a sub-Router along a `pattern`` string.
 	Route(pattern string, fn func(r Router)) Router
 
-	// Mount attaches another http.Handler along ./pattern/*
-	Mount(pattern string, h http.Handler)
+	// Mount attaches another fchi.Handler along ./pattern/*
+	Mount(pattern string, h fchi.Handler)
 
 	// Handle and HandleFunc adds routes for `pattern` that matches
 	// all HTTP methods.
-	Handle(pattern string, h http.Handler)
-	HandleFunc(pattern string, h http.HandlerFunc)
+	Handle(pattern string, h fchi.Handler)
 
 	// Method and MethodFunc adds routes for `pattern` that matches
 	// the `method` HTTP method.
-	Method(method, pattern string, h http.Handler)
-	MethodFunc(method, pattern string, h http.HandlerFunc)
+	Method(method, pattern string, h fchi.Handler)
 
 	// HTTP-method routing along `pattern`
-	Connect(pattern string, h http.HandlerFunc)
-	Delete(pattern string, h http.HandlerFunc)
-	Get(pattern string, h http.HandlerFunc)
-	Head(pattern string, h http.HandlerFunc)
-	Options(pattern string, h http.HandlerFunc)
-	Patch(pattern string, h http.HandlerFunc)
-	Post(pattern string, h http.HandlerFunc)
-	Put(pattern string, h http.HandlerFunc)
-	Trace(pattern string, h http.HandlerFunc)
+	Connect(pattern string, h fchi.HandlerFunc)
+	Delete(pattern string, h fchi.HandlerFunc)
+	Get(pattern string, h fchi.HandlerFunc)
+	Head(pattern string, h fchi.HandlerFunc)
+	Options(pattern string, h fchi.HandlerFunc)
+	Patch(pattern string, h fchi.HandlerFunc)
+	Post(pattern string, h fchi.HandlerFunc)
+	Put(pattern string, h fchi.HandlerFunc)
+	Trace(pattern string, h fchi.HandlerFunc)
 
 	// NotFound defines a handler to respond whenever a route could
 	// not be found.
-	NotFound(h http.HandlerFunc)
+	NotFound(h fchi.HandlerFunc)
 
 	// MethodNotAllowed defines a handler to respond whenever a method is
 	// not allowed.
-	MethodNotAllowed(h http.HandlerFunc)
+	MethodNotAllowed(h fchi.HandlerFunc)
 }
 
 // Routes interface adds two methods for router traversal, which is also
@@ -252,21 +251,16 @@ and `chi.URLParam(r, "*")` for a wildcard parameter.
 
 ### Middleware handlers
 
-chi's middlewares are just stdlib net/http middleware handlers. There is nothing special
-about them, which means the router and all the tooling is designed to be compatible and
-friendly with any middleware in the community. This offers much better extensibility and reuse
-of packages and is at the heart of chi's purpose.
-
-Here is an example of a standard net/http middleware handler using the new request context
+Here is an example of a fasthttp middleware handler using the new request context
 available in Go. This middleware sets a hypothetical user identifier on the request
 context and calls the next handler in the chain.
 
 ```go
 // HTTP middleware setting a value on the request context
-func MyMiddleware(next http.Handler) http.Handler {
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    ctx := context.WithValue(r.Context(), "user", "123")
-    next.ServeHTTP(w, r.WithContext(ctx))
+func MyMiddleware(next fchi.Handler) fchi.Handler {
+  return fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+    ctx = context.WithValue(r.Context(), "user", "123")
+    next.ServeHTTP(ctx, rc)
   })
 }
 ```
@@ -274,15 +268,15 @@ func MyMiddleware(next http.Handler) http.Handler {
 
 ### Request handlers
 
-chi uses standard net/http request handlers. This little snippet is an example of a http.Handler
+chi uses standard net/http request handlers. This little snippet is an example of a fchi.Handler
 func that reads a user identifier from the request context - hypothetically, identifying
 the user sending an authenticated request, validated+set by a previous middleware handler.
 
 ```go
 // HTTP handler accessing data from the request context.
-func MyRequestHandler(w http.ResponseWriter, r *http.Request) {
-  user := r.Context().Value("user").(string)
-  w.Write([]byte(fmt.Sprintf("hi %s", user)))
+func MyRequestHandler(ctx context.Context, rc *fasthttp.RequestCtx) {
+  user := ctx.Value("user").(string)
+  rc.Write([]byte(fmt.Sprintf("hi %s", user)))
 }
 ```
 
@@ -295,22 +289,20 @@ are able to access the same information.
 
 ```go
 // HTTP handler accessing the url routing parameters.
-func MyRequestHandler(w http.ResponseWriter, r *http.Request) {
-  userID := chi.URLParam(r, "userID") // from a route like /users/{userID}
+func MyRequestHandler(ctx context.Context, rc *fasthttp.RequestCtx) {
+  userID := fchi.URLParam(rc, "userID") // from a route like /users/{userID}
 
-  ctx := r.Context()
   key := ctx.Value("key").(string)
 
-  w.Write([]byte(fmt.Sprintf("hi %v, %v", userID, key)))
+  rc.Write([]byte(fmt.Sprintf("hi %v, %v", userID, key)))
 }
 ```
 
 
 ## Middlewares
 
-chi comes equipped with an optional `middleware` package, providing a suite of standard
-`net/http` middlewares. Please note, any middleware in the ecosystem that is also compatible
-with `net/http` can be used with chi's mux.
+chi comes equipped with an optional `middleware` package, providing a suite of
+`fasthttp` middlewares. 
 
 ### Core middlewares
 
@@ -378,22 +370,14 @@ The benchmark suite: https://github.com/pkieltyka/go-http-routing-benchmark
 Results as of Jan 9, 2019 with Go 1.11.4 on Linux X1 Carbon laptop
 
 ```shell
-BenchmarkChi_Param            3000000         475 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_Param5           2000000         696 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_Param20          1000000        1275 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_ParamWrite       3000000         505 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_GithubStatic     3000000         508 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_GithubParam      2000000         669 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_GithubAll          10000      134627 ns/op     87699 B/op    609 allocs/op
-BenchmarkChi_GPlusStatic      3000000         402 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_GPlusParam       3000000         500 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_GPlus2Params     3000000         586 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_GPlusAll          200000        7237 ns/op      5616 B/op     39 allocs/op
-BenchmarkChi_ParseStatic      3000000         408 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_ParseParam       3000000         488 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_Parse2Params     3000000         551 ns/op       432 B/op      3 allocs/op
-BenchmarkChi_ParseAll          100000       13508 ns/op     11232 B/op     78 allocs/op
-BenchmarkChi_StaticAll          20000       81933 ns/op     67826 B/op    471 allocs/op
+BenchmarkMux/route:/-16                  6323047               167 ns/op              83 B/op          0 allocs/op
+BenchmarkMux/route:/hi-16                5262666               193 ns/op              83 B/op          1 allocs/op
+BenchmarkMux/route:/sup/123/and/this-16                  2106927               499 ns/op             435 B/op          1 allocs/op
+BenchmarkMux/route:/sup/123/foo/this-16                  1526112               798 ns/op             677 B/op          1 allocs/op
+BenchmarkMux/route:/sharing/z/aBc-16                     6755617               159 ns/op              97 B/op          0 allocs/op
+BenchmarkMux/route:/sharing/z/aBc/twitter-16             9653289               133 ns/op             107 B/op          0 allocs/op
+BenchmarkMux/route:/sharing/z/aBc/direct-16              6590539               153 ns/op              80 B/op          0 allocs/op
+BenchmarkMux/route:/sharing/z/aBc/direct/download-16             9125960               115 ns/op              90 B/op          0 allocs/op
 ```
 
 Comparison with other routers: https://gist.github.com/pkieltyka/123032f12052520aaccab752bd3e78cc

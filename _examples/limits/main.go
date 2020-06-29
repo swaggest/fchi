@@ -17,72 +17,71 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"net/http"
 	"time"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/swaggest/fchi"
+	"github.com/swaggest/fchi/middleware"
+	"github.com/valyala/fasthttp"
 )
 
 func main() {
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("root."))
-	})
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("root."))
+	}))
 
-	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("pong"))
-	})
+	r.Get("/ping", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("pong"))
+	}))
 
-	r.Get("/panic", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/panic", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		panic("test")
-	})
+	}))
 
 	// Slow handlers/operations.
-	r.Group(func(r chi.Router) {
+	r.Group(func(r fchi.Router) {
 		// Stop processing after 2.5 seconds.
 		r.Use(middleware.Timeout(2500 * time.Millisecond))
 
-		r.Get("/slow", func(w http.ResponseWriter, r *http.Request) {
+		r.Get("/slow", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			rand.Seed(time.Now().Unix())
 
 			// Processing will take 1-5 seconds.
 			processTime := time.Duration(rand.Intn(4)+1) * time.Second
 
 			select {
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 
 			case <-time.After(processTime):
 				// The above channel simulates some hard work.
 			}
 
-			w.Write([]byte(fmt.Sprintf("Processed in %v seconds\n", processTime)))
-		})
+			rc.Write([]byte(fmt.Sprintf("Processed in %v seconds\n", processTime)))
+		}))
 	})
 
 	// Throttle very expensive handlers/operations.
-	r.Group(func(r chi.Router) {
+	r.Group(func(r fchi.Router) {
 		// Stop processing after 30 seconds.
 		r.Use(middleware.Timeout(30 * time.Second))
 
 		// Only one request will be processed at a time.
 		r.Use(middleware.Throttle(1))
 
-		r.Get("/throttled", func(w http.ResponseWriter, r *http.Request) {
+		r.Get("/throttled", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			select {
-			case <-r.Context().Done():
-				switch r.Context().Err() {
+			case <-ctx.Done():
+				switch ctx.Err() {
 				case context.DeadlineExceeded:
-					w.WriteHeader(504)
-					w.Write([]byte("Processing too slow\n"))
+					rc.Response.Header.SetStatusCode(504)
+					rc.Write([]byte("Processing too slow\n"))
 				default:
-					w.Write([]byte("Canceled\n"))
+					rc.Write([]byte("Canceled\n"))
 				}
 				return
 
@@ -90,9 +89,9 @@ func main() {
 				// The above channel simulates some hard work.
 			}
 
-			w.Write([]byte("Processed\n"))
-		})
+			rc.Write([]byte("Processed\n"))
+		}))
 	})
 
-	http.ListenAndServe(":3333", r)
+	fasthttp.ListenAndServe(":3333", fchi.RequestHandler(r))
 }

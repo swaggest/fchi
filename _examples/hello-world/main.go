@@ -1,21 +1,21 @@
 package main
 
 import (
-	"net/http"
+	"context"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/swaggest/fchi"
+	"github.com/swaggest/fchi/middleware"
+	"github.com/valyala/fasthttp"
 )
 
 func main() {
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("hello world"))
-	})
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("hello world"))
+	}))
 
-	http.ListenAndServe(":3333", r)
+	fasthttp.ListenAndServe(":3333", fchi.RequestHandler(r))
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -15,39 +14,6 @@ import (
 
 	"github.com/valyala/fasthttp"
 )
-
-type testServer struct {
-	URL  string
-	fsrv fasthttp.Server
-}
-
-func newTestServer(r Handler) *testServer {
-	ts := testServer{}
-
-	ts.fsrv.Handler = RequestHandler(r)
-	ts.fsrv.IdleTimeout = 10 * time.Millisecond
-
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		if l, err = net.Listen("tcp6", "[::1]:0"); err != nil {
-			panic(fmt.Sprintf("httptest: failed to listen on a port: %v", err))
-		}
-	}
-	ts.URL = "http://" + l.Addr().String()
-
-	go func() {
-		ts.fsrv.Serve(l)
-	}()
-
-	return &ts
-}
-
-func (ts *testServer) Close() {
-	err := ts.fsrv.Shutdown()
-	if err != nil {
-		panic(err)
-	}
-}
 
 func TestMuxBasic(t *testing.T) {
 	var count uint64
@@ -147,7 +113,7 @@ func TestMuxBasic(t *testing.T) {
 	m.Handle("/admin/*", HandlerFunc(catchAll))
 	// m.Post("/admin/*", catchAll)
 
-	ts := newTestServer(m)
+	ts := NewTestServer(m)
 	defer ts.Close()
 
 	// GET /
@@ -260,7 +226,7 @@ func TestMuxMounts(t *testing.T) {
 	m := NewRouter()
 	m.Mount("/sharing", r)
 
-	ts := newTestServer(m)
+	ts := NewTestServer(m)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/sharing/aBc", nil); body != "/aBc" {
@@ -284,7 +250,7 @@ func TestMuxPlain(t *testing.T) {
 		rc.Write([]byte("nothing here"))
 	}))
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -331,7 +297,7 @@ func TestMuxTrailingSlash(t *testing.T) {
 	r.Mount("/accounts/{accountID}", subRoutes)
 	r.Get("/accounts/{accountID}/", HandlerFunc(indexHandler))
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/accounts/admin", nil); body != "admin" {
@@ -398,7 +364,7 @@ func TestMuxNestedNotFound(t *testing.T) {
 	r.Mount("/admin1", sr1)
 	r.Mount("/admin2", sr2)
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -450,7 +416,7 @@ func TestMuxNestedMethodNotAllowed(t *testing.T) {
 	r.Mount("/prefix1", sr1)
 	r.Mount("/prefix2", sr2)
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/root", nil); body != "root" {
@@ -505,7 +471,7 @@ func TestMuxComplicatedNotFound(t *testing.T) {
 	}
 
 	testNotFound := func(t *testing.T, r *Mux) {
-		ts := newTestServer(r)
+		ts := NewTestServer(r)
 		defer ts.Close()
 
 		// check that we didn't break correct routes
@@ -595,7 +561,7 @@ func TestMuxWith(t *testing.T) {
 		rc.Write([]byte(fmt.Sprintf("inline %s %s", v1, v2)))
 	}))
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -631,7 +597,7 @@ func TestRouterFromMuxWith(t *testing.T) {
 
 	with.Get("/with_middleware", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {}))
 
-	ts := newTestServer(with)
+	ts := NewTestServer(with)
 	defer ts.Close()
 
 	// Without the fix this test was committed with, this causes a panic.
@@ -694,7 +660,7 @@ func TestMuxMiddlewareStack(t *testing.T) {
 		rc.Write([]byte("wooot"))
 	}))
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	testRequest(t, ts, "GET", "/", nil)
@@ -745,7 +711,7 @@ func TestMuxRouteGroups(t *testing.T) {
 		}))
 	})
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	// GET /group
@@ -770,7 +736,7 @@ func TestMuxRouteGroups(t *testing.T) {
 func TestMuxBig(t *testing.T) {
 	r := bigMux()
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	var body, expected string
@@ -1027,7 +993,7 @@ func TestMuxSubroutesBasic(t *testing.T) {
 	// log.Println("~~~~~~~~~")
 	// log.Println("~~~~~~~~~")
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	var body, expected string
@@ -1103,7 +1069,7 @@ func TestMuxSubroutes(t *testing.T) {
 	// sr2.Mount("/", sr3)
 	// r.Mount("/accounts/{accountID}", sr2)
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	var body, expected string
@@ -1316,7 +1282,7 @@ func TestNestedGroups(t *testing.T) {
 		})
 	})
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	for _, route := range []string{"0", "1", "2", "3", "4", "5", "6"} {
@@ -1382,7 +1348,7 @@ func TestMountingSimilarPattern(t *testing.T) {
 	r.Mount("/foobar", r2)
 	r.Mount("/foo", r3)
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/hi", nil); body != "bye" {
@@ -1399,7 +1365,7 @@ func TestMuxEmptyParams(t *testing.T) {
 		rc.Write([]byte(fmt.Sprintf("%s-%s-%s", x, y, z)))
 	}))
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/users/a/b/c", nil); body != "a-b-c" {
@@ -1421,7 +1387,7 @@ func TestMuxMissingParams(t *testing.T) {
 		rc.Write([]byte("nothing here"))
 	}))
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/user/123", nil); body != "userId = '123'" {
@@ -1466,7 +1432,7 @@ func TestMuxRegexp(t *testing.T) {
 		}))
 	})
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "//test", nil); body != "Hi: " {
@@ -1479,7 +1445,7 @@ func TestMuxRegexp2(t *testing.T) {
 	r.Get("/foo-{suffix:[a-z]{2,3}}.json", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		rc.Write([]byte(URLParam(rc, "suffix")))
 	}))
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/foo-.json", nil); body != "" {
@@ -1514,7 +1480,7 @@ func TestMuxRegexp3(t *testing.T) {
 		}))
 	})
 
-	ts := newTestServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/one/hello/peter/first", nil); body != "first" {
@@ -1595,7 +1561,7 @@ func TestEscapedURLParams(t *testing.T) {
 		rc.Write([]byte("success"))
 	}))
 
-	ts := newTestServer(m)
+	ts := NewTestServer(m)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/api/http:%2f%2fexample.com%2fimage.png/full/max/0/color.png", nil); body != "success" {
@@ -1641,7 +1607,7 @@ func TestMuxMatch(t *testing.T) {
 	}
 }
 
-func testRequest(t *testing.T, ts *testServer, method, path string, body io.Reader) (*http.Response, string) {
+func testRequest(t *testing.T, ts *TestServer, method, path string, body io.Reader) (*http.Response, string) {
 	req, err := http.NewRequest(method, ts.URL+path, body)
 	if err != nil {
 		t.Fatal(err)

@@ -1,42 +1,43 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi"
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 func main() {
-	r := chi.NewRouter()
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("root."))
+	r := fchi.NewRouter()
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("root."))
+	}))
+
+	r.Route("/road", func(r fchi.Router) {
+		r.Get("/left", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("left road"))
+		}))
+		r.Post("/right", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+			rc.Write([]byte("right road"))
+		}))
 	})
 
-	r.Route("/road", func(r chi.Router) {
-		r.Get("/left", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("left road"))
-		})
-		r.Post("/right", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("right road"))
-		})
-	})
+	r.Put("/ping", fchi.HandlerFunc(Ping))
 
-	r.Put("/ping", Ping)
-
-	walkFunc := func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+	walkFunc := func(method string, route string, handler fchi.Handler, middlewares ...func(fchi.Handler) fchi.Handler) error {
 		route = strings.Replace(route, "/*/", "/", -1)
 		fmt.Printf("%s %s\n", method, route)
 		return nil
 	}
 
-	if err := chi.Walk(r, walkFunc); err != nil {
+	if err := fchi.Walk(r, walkFunc); err != nil {
 		fmt.Printf("Logging err: %s\n", err.Error())
 	}
 }
 
 // Ping returns pong
-func Ping(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("pong"))
+func Ping(ctx context.Context, rc *fasthttp.RequestCtx) {
+	rc.Write([]byte("pong"))
 }

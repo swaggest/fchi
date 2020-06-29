@@ -1,35 +1,36 @@
 package main
 
 import (
+	"context"
 	"errors"
-	"net/http"
 
-	"github.com/go-chi/chi"
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
-type Handler func(w http.ResponseWriter, r *http.Request) error
+type Handler func(ctx context.Context, rc *fasthttp.RequestCtx) error
 
-func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := h(w, r); err != nil {
+func (h Handler) ServeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
+	if err := h(ctx, rc); err != nil {
 		// handle returned error here.
-		w.WriteHeader(503)
-		w.Write([]byte("bad"))
+		rc.Response.Header.SetStatusCode(503)
+		rc.Write([]byte("bad"))
 	}
 }
 
 func main() {
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 	r.Method("GET", "/", Handler(customHandler))
-	http.ListenAndServe(":3333", r)
+	fasthttp.ListenAndServe(":3333", fchi.RequestHandler(r))
 }
 
-func customHandler(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query().Get("err")
+func customHandler(ctx context.Context, rc *fasthttp.RequestCtx) error {
+	q := rc.Request.URI().QueryArgs().Peek("err")
 
-	if q != "" {
-		return errors.New(q)
+	if len(q) > 0 {
+		return errors.New(string(q))
 	}
 
-	w.Write([]byte("foo"))
+	rc.Write([]byte("foo"))
 	return nil
 }
