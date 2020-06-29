@@ -2,9 +2,10 @@ package middleware
 
 import (
 	"context"
+	"time"
+
 	"github.com/swaggest/fchi"
 	"github.com/valyala/fasthttp"
-	"time"
 )
 
 // Timeout is a middleware that cancels ctx after a given timeout and return

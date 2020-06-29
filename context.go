@@ -6,6 +6,34 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// URLParam returns the url parameter from a http.Request object.
+func URLParam(rc *fasthttp.RequestCtx, key string) string {
+	if rctx := RouteContext(rc); rctx != nil {
+		return rctx.URLParam(key)
+	}
+	return ""
+}
+
+// URLParamFromCtx returns the url parameter from a http.Request Context.
+func URLParamFromCtx(rc *fasthttp.RequestCtx, key string) string {
+	if rctx := RouteContext(rc); rctx != nil {
+		return rctx.URLParam(key)
+	}
+	return ""
+}
+
+// RouteContext returns chi's routing Context object from a
+// http.Request Context.
+func RouteContext(rc *fasthttp.RequestCtx) *Context {
+	val, _ := rc.UserValue(routeUserValueKey).(*Context)
+	return val
+}
+
+// NewRouteContext returns a new routing Context object.
+func NewRouteContext() *Context {
+	return &Context{}
+}
+
 var (
 	// routeUserValueKey is the user value key to store the request context.
 	routeUserValueKey = "fchiRouteCtx"
@@ -43,11 +71,6 @@ type Context struct {
 
 	// methodNotAllowed hint
 	methodNotAllowed bool
-}
-
-// NewRouteContext returns a new routing Context object.
-func NewRouteContext() *Context {
-	return &Context{}
 }
 
 // Reset a routing context to its initial state.
@@ -103,29 +126,6 @@ func replaceWildcards(p string) string {
 	}
 
 	return p
-}
-
-// RouteContext returns chi's routing Context object from a
-// http.Request Context.
-func RouteContext(rc *fasthttp.RequestCtx) *Context {
-	val, _ := rc.UserValue(routeUserValueKey).(*Context)
-	return val
-}
-
-// URLParam returns the url parameter from a http.Request object.
-func URLParam(rc *fasthttp.RequestCtx, key string) string {
-	if rctx := RouteContext(rc); rctx != nil {
-		return rctx.URLParam(key)
-	}
-	return ""
-}
-
-// URLParamFromCtx returns the url parameter from a http.Request Context.
-func URLParamFromCtx(rc *fasthttp.RequestCtx, key string) string {
-	if rctx := RouteContext(rc); rctx != nil {
-		return rctx.URLParam(key)
-	}
-	return ""
 }
 
 // RouteParams is a structure to track URL routing parameters efficiently.

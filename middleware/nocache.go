@@ -5,9 +5,10 @@ package middleware
 
 import (
 	"context"
+	"time"
+
 	"github.com/swaggest/fchi"
 	"github.com/valyala/fasthttp"
-	"time"
 )
 
 // Unix epoch time

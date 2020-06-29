@@ -8,12 +8,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/swaggest/fchi"
-	"github.com/valyala/fasthttp"
 	"net/http"
 	"os"
 	"runtime/debug"
 	"strings"
+
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 // Recoverer is a middleware that recovers from panics, logs the panic (and a

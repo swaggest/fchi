@@ -1546,7 +1546,7 @@ func TestMuxContextIsThreadSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 10000; j++ {
+			for j := 0; j < 100; j++ {
 				rc := fasthttp.RequestCtx{}
 				rc.Request.Header.SetMethod("GET")
 				rc.Request.SetRequestURI("/ok")
