@@ -1,7 +1,10 @@
-# <img alt="chi" src="https://cdn.rawgit.com/go-chi/chi/master/_examples/chi.svg" width="220" />
+# <img src="https://avatars2.githubusercontent.com/u/42277636?s=100&v=4" /> <img alt="chi" src="https://cdn.rawgit.com/go-chi/chi/master/_examples/chi.svg" width="220" />
 
-
-[![GoDoc Widget]][GoDoc] [![Travis Widget]][Travis]
+[![Build Status](https://travis-ci.org/swaggest/fchi.svg?branch=master)](https://travis-ci.org/swaggest/fchi)
+[![Coverage Status](https://codecov.io/gh/swaggest/fchi/branch/master/graph/badge.svg)](https://codecov.io/gh/swaggest/fchi)
+[![GoDevDoc](https://img.shields.io/badge/dev-doc-00ADD8?logo=go)](https://pkg.go.dev/github.com/swaggest/fchi)
+![Code lines](https://sloc.xyz/github/swaggest/fchi/?category=code)
+![Comments](https://sloc.xyz/github/swaggest/fchi/?category=comments)
 
 `chi` is a lightweight, idiomatic and composable router for building Go HTTP services. It's
 especially good at helping you write large REST API services that are kept maintainable as your
@@ -418,8 +421,3 @@ Looking beyond REST, I also recommend some newer works in the field:
 Copyright (c) 2015-present [Peter Kieltyka](https://github.com/pkieltyka)
 
 Licensed under [MIT License](./LICENSE)
-
-[GoDoc]: https://godoc.org/github.com/go-chi/chi
-[GoDoc Widget]: https://godoc.org/github.com/go-chi/chi?status.svg
-[Travis]: https://travis-ci.org/go-chi/chi
-[Travis Widget]: https://travis-ci.org/go-chi/chi.svg?branch=master
