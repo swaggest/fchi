@@ -1,6 +1,6 @@
 # <img src="https://avatars2.githubusercontent.com/u/42277636?s=100&v=4" /> <img alt="chi" src="https://cdn.rawgit.com/go-chi/chi/master/_examples/chi.svg" width="220" />
 
-[![Build Status](https://travis-ci.org/swaggest/fchi.svg?branch=master)](https://travis-ci.org/swaggest/fchi)
+[![Build Status](https://github.com/swaggest/fchi/workflows/test/badge.svg)](https://github.com/swaggest/fchi/actions?query=branch%3Amaster+workflow%3Atest)
 [![Coverage Status](https://codecov.io/gh/swaggest/fchi/branch/master/graph/badge.svg)](https://codecov.io/gh/swaggest/fchi)
 [![GoDevDoc](https://img.shields.io/badge/dev-doc-00ADD8?logo=go)](https://pkg.go.dev/github.com/swaggest/fchi)
 ![Code lines](https://sloc.xyz/github/swaggest/fchi/?category=code)
@@ -33,12 +33,8 @@ This fork changes `chi` implementation to work with [`github.com/valyala/fasthtt
 
 * **Lightweight** - cloc'd in ~1000 LOC for the chi router
 * **Fast** - yes, see [benchmarks](#benchmarks)
-* **100% compatible with net/http** - use any http or middleware pkg in the ecosystem that is also compatible with `net/http`
 * **Designed for modular/composable APIs** - middlewares, inline middlewares, route groups and subrouter mounting
 * **Context control** - built on new `context` package, providing value chaining, cancellations and timeouts
-* **Robust** - in production at Pressly, CloudFlare, Heroku, 99Designs, and many others (see [discussion](https://github.com/go-chi/chi/issues/91))
-* **Doc generation** - `docgen` auto-generates routing documentation from your source to JSON or Markdown
-* **No external dependencies** - plain ol' Go stdlib + net/http
 
 
 ## Examples
@@ -53,7 +49,6 @@ package main
 
 import (
 	"context"
-    "net/http"
 
 	"github.com/swaggest/fchi"
 	"github.com/swaggest/fchi/middleware"
@@ -271,7 +266,7 @@ func MyMiddleware(next fchi.Handler) fchi.Handler {
 
 ### Request handlers
 
-chi uses standard net/http request handlers. This little snippet is an example of a fchi.Handler
+chi uses fasthttp request handlers. This little snippet is an example of a fchi.Handler
 func that reads a user identifier from the request context - hypothetically, identifying
 the user sending an authenticated request, validated+set by a previous middleware handler.
 
@@ -287,7 +282,7 @@ func MyRequestHandler(ctx context.Context, rc *fasthttp.RequestCtx) {
 ### URL parameters
 
 chi's router parses and stores URL parameters right onto the request context. Here is
-an example of how to access URL params in your net/http handlers. And of course, middlewares
+an example of how to access URL params in your fasthttp handlers. And of course, middlewares
 are able to access the same information.
 
 ```go
