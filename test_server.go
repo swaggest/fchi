@@ -19,7 +19,7 @@ func NewTestServer(r Handler) *TestServer {
 	ts := TestServer{}
 
 	ts.fsrv.Handler = RequestHandler(r)
-	ts.fsrv.IdleTimeout = 10 * time.Millisecond
+	ts.fsrv.ReadTimeout = 10 * time.Millisecond
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
