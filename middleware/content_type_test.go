@@ -1,12 +1,16 @@
+// TODO convert middleware to fasthttp.
+// +build ignore
+
 package middleware
 
 import (
 	"bytes"
+	"context"
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func TestContentType(t *testing.T) {
@@ -63,9 +67,9 @@ func TestContentType(t *testing.T) {
 
 			recorder := httptest.NewRecorder()
 
-			r := chi.NewRouter()
+			r := fchi.NewRouter()
 			r.Use(AllowContentType(tt.allowedContentTypes...))
-			r.Post("/", func(w http.ResponseWriter, r *http.Request) {})
+			r.Post("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {}))
 
 			body := []byte("This is my content. There are many like this but this one is mine")
 			req := httptest.NewRequest("POST", "/", bytes.NewReader(body))

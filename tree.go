@@ -6,12 +6,12 @@ package fchi
 
 import (
 	"fmt"
-	"github.com/valyala/fasthttp"
-	"math"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/valyala/fasthttp"
 )
 
 type methodTyp uint

@@ -80,7 +80,7 @@ func (mx *Mux) ServeHTTP(ctx context.Context, rc *fasthttp.RequestCtx) {
 	rctx = mx.pool.Get().(*Context)
 	rctx.Reset()
 	rctx.Routes = mx
-	rctx.parentCtx = r.Context()
+	rctx.parentCtx = ctx
 
 	rc.SetUserValue(routeUserValueKey, rctx)
 

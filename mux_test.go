@@ -1516,7 +1516,7 @@ func TestMuxRegexp3(t *testing.T) {
 func TestMuxSubrouterWildcardParam(t *testing.T) {
 	h := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 		fmt.Fprintf(rc, "param:%v *:%v", URLParam(rc, "param"), URLParam(rc, "*"))
-	}))
+	})
 
 	r := NewRouter()
 
@@ -1528,7 +1528,7 @@ func TestMuxSubrouterWildcardParam(t *testing.T) {
 		r.Get("/{param}/*", h)
 	})
 
-	ts := httptest.NewServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/bare/hi", nil); body != "param:hi *:" {
@@ -1623,16 +1623,16 @@ func TestCustomHTTPMethod(t *testing.T) {
 	RegisterMethod("BOO")
 
 	r := NewRouter()
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("."))
-	})
+	r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("."))
+	}))
 
 	// note the custom BOO method for route /hi
-	r.MethodFunc("BOO", "/hi", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("custom method"))
-	})
+	r.Method("BOO", "/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("custom method"))
+	}))
 
-	ts := httptest.NewServer(r)
+	ts := NewTestServer(r)
 	defer ts.Close()
 
 	if _, body := testRequest(t, ts, "GET", "/", nil); body != "." {
@@ -1683,24 +1683,19 @@ func TestMuxMatch(t *testing.T) {
 
 func TestServerBaseContext(t *testing.T) {
 	r := NewRouter()
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		baseYes := r.Context().Value(ctxKey{"base"}).(string)
-		if _, ok := r.Context().Value(http.ServerContextKey).(*http.Server); !ok {
-			panic("missing server context")
-		}
-		if _, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); !ok {
-			panic("missing local addr context")
-		}
-		w.Write([]byte(baseYes))
-	})
+	r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		baseYes := ctx.Value(ctxKey{"base"}).(string)
+		rc.Write([]byte(baseYes))
+	}))
 
 	// Setup http Server with a base context
-	ctx := context.WithValue(context.Background(), ctxKey{"base"}, "yes")
-	ts := httptest.NewUnstartedServer(r)
-	ts.Config.BaseContext = func(_ net.Listener) context.Context {
-		return ctx
-	}
-	ts.Start()
+	baseCtx := context.WithValue(context.Background(), ctxKey{"base"}, "yes")
+
+	rh := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		r.ServeHTTP(baseCtx, rc)
+	})
+
+	ts := NewTestServer(rh)
 
 	defer ts.Close()
 

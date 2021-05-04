@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"strings"
 

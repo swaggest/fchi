@@ -1,6 +1,7 @@
 package fchi
 
 import (
+	"context"
 	"strings"
 
 	"github.com/valyala/fasthttp"

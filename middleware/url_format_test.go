@@ -1,15 +1,17 @@
+// TODO convert middleware to fasthttp.
+// +build ignore
+
 package middleware
 
 import (
+	"github.com/swaggest/fchi"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func TestURLFormat(t *testing.T) {
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 
 	r.Use(URLFormat)
 
@@ -18,16 +20,16 @@ func TestURLFormat(t *testing.T) {
 		w.Write([]byte("nothing here"))
 	})
 
-	r.Route("/samples/articles/samples.{articleID}", func(r chi.Router) {
+	r.Route("/samples/articles/samples.{articleID}", func(r fchi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			articleID := chi.URLParam(r, "articleID")
+			articleID := fchi.URLParam(r, "articleID")
 			w.Write([]byte(articleID))
 		})
 	})
 
-	r.Route("/articles/{articleID}", func(r chi.Router) {
+	r.Route("/articles/{articleID}", func(r fchi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			articleID := chi.URLParam(r, "articleID")
+			articleID := fchi.URLParam(r, "articleID")
 			w.Write([]byte(articleID))
 		})
 	})
