@@ -1,8 +1,7 @@
 package middleware
 
 import (
-	"context"
-	"encoding/base64"
+	"crypto/subtle"
 	"fmt"
 	"strings"
 
@@ -21,7 +20,7 @@ func BasicAuth(realm string, creds map[string]string) func(next fchi.Handler) fc
 			}
 
 			credPass, credUserOk := creds[user]
-			if !credUserOk || pass != credPass {
+			if !credUserOk || subtle.ConstantTimeCompare([]byte(pass), []byte(credPass)) != 1 {
 				basicAuthFailed(rc, realm)
 				return
 			}

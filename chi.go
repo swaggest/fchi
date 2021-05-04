@@ -1,7 +1,7 @@
 //
 // Package fchi is a small, idiomatic and composable router for building HTTP services.
 //
-// chi requires Go 1.11 or newer.
+// fchi requires Go 1.11 or newer.
 //
 // Example:
 //  package main

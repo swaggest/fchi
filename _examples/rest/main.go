@@ -4,7 +4,8 @@
 // This example demonstrates a HTTP REST web service with some fixture data.
 // Follow along the example and patterns.
 //
-// Also check routes.json for the generated docs from passing the -routes flag
+// Also check routes.json for the generated docs from passing the -routes flag,
+// to run yourself do: `go run . -routes`
 //
 // Boot the server:
 // ----------------
@@ -47,8 +48,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/docgen"
 	"github.com/go-chi/render"
 )
@@ -105,7 +106,7 @@ func main() {
 	if *routes {
 		// fmt.Println(docgen.JSONRoutesDoc(r))
 		fmt.Println(docgen.MarkdownRoutesDoc(r, docgen.MarkdownOpts{
-			ProjectPath: "github.com/go-chi/chi",
+			ProjectPath: "github.com/go-chi/chi/v5",
 			Intro:       "Welcome to the chi/_examples/rest generated docs.",
 		}))
 		return

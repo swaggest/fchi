@@ -48,7 +48,6 @@ func Compress(level int, types ...string) func(next http.Handler) http.Handler {
 
 // Compressor represents a set of encoding configurations.
 type Compressor struct {
-	level int // The compression level.
 	// The mapping of encoder names to encoder functions.
 	encoders map[string]EncoderFunc
 	// The mapping of pooled encoders to pools.
@@ -58,6 +57,7 @@ type Compressor struct {
 	allowedWildcards map[string]struct{}
 	// The list of encoders in order of decreasing precedence.
 	encodingPrecedence []string
+	level              int // The compression level.
 }
 
 // NewCompressor creates a new Compressor that will handle encoding responses.
@@ -274,9 +274,9 @@ type compressResponseWriter struct {
 	// The streaming encoder writer to be used if there is one. Otherwise,
 	// this is just the normal writer.
 	w                io.Writer
-	encoding         string
 	contentTypes     map[string]struct{}
 	contentWildcards map[string]struct{}
+	encoding         string
 	wroteHeader      bool
 	compressable     bool
 }

@@ -38,6 +38,13 @@ func Profiler() fchi.Handler {
 	r.Handle("/pprof/trace", fchi.Adapt(http.HandlerFunc(pprof.Trace)))
 	r.Handle("/vars", fchi.HandlerFunc(expVars))
 
+	r.Handle("/pprof/goroutine", fchi.Adapt(pprof.Handler("goroutine")))
+	r.Handle("/pprof/threadcreate", fchi.Adapt(pprof.Handler("threadcreate")))
+	r.Handle("/pprof/mutex", fchi.Adapt(pprof.Handler("mutex")))
+	r.Handle("/pprof/heap", fchi.Adapt(pprof.Handler("heap")))
+	r.Handle("/pprof/block", fchi.Adapt(pprof.Handler("block")))
+	r.Handle("/pprof/allocs", fchi.Adapt(pprof.Handler("allocs")))
+
 	return r
 }
 

@@ -21,10 +21,10 @@ var (
 
 // ThrottleOpts represents a set of throttling options.
 type ThrottleOpts struct {
+	RetryAfterFn   func(ctxDone bool) time.Duration
 	Limit          int
 	BacklogLimit   int
 	BacklogTimeout time.Duration
-	RetryAfterFn   func(ctxDone bool) time.Duration
 }
 
 // Throttle is a middleware that limits number of currently processed requests
@@ -73,7 +73,7 @@ func ThrottleWithOpts(opts ThrottleOpts) func(fchi.Handler) fchi.Handler {
 
 			case <-ctx.Done():
 				t.setRetryAfterHeaderIfNeeded(rc, true)
-				rc.Error(errContextCanceled, fasthttp.StatusServiceUnavailable)
+				rc.Error(errContextCanceled, fasthttp.StatusTooManyRequests)
 				return
 
 			case btok := <-t.backlogTokens:
@@ -86,12 +86,12 @@ func ThrottleWithOpts(opts ThrottleOpts) func(fchi.Handler) fchi.Handler {
 				select {
 				case <-timer.C:
 					t.setRetryAfterHeaderIfNeeded(rc, false)
-					rc.Error(errTimedOut, fasthttp.StatusServiceUnavailable)
+					rc.Error(errTimedOut, fasthttp.StatusTooManyRequests)
 					return
 				case <-ctx.Done():
 					timer.Stop()
 					t.setRetryAfterHeaderIfNeeded(rc, true)
-					rc.Error(errContextCanceled, fasthttp.StatusServiceUnavailable)
+					rc.Error(errContextCanceled, fasthttp.StatusTooManyRequests)
 					return
 				case tok := <-t.tokens:
 					defer func() {
@@ -104,7 +104,7 @@ func ThrottleWithOpts(opts ThrottleOpts) func(fchi.Handler) fchi.Handler {
 
 			default:
 				t.setRetryAfterHeaderIfNeeded(rc, false)
-				rc.Error(errCapacityExceeded, fasthttp.StatusServiceUnavailable)
+				rc.Error(errCapacityExceeded, fasthttp.StatusTooManyRequests)
 				return
 			}
 		}
@@ -120,8 +120,8 @@ type token struct{}
 type throttler struct {
 	tokens         chan token
 	backlogTokens  chan token
-	backlogTimeout time.Duration
 	retryAfterFn   func(ctxDone bool) time.Duration
+	backlogTimeout time.Duration
 }
 
 // setRetryAfterHeaderIfNeeded sets Retry-After HTTP header if corresponding retryAfterFn option of throttler is initialized.

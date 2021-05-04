@@ -9,10 +9,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 )
 
-func maintainDefaultRequestId() func() {
+func maintainDefaultRequestID() func() {
 	original := RequestIDHeader
 
 	return func() {
@@ -48,7 +48,7 @@ func TestRequestID(t *testing.T) {
 		},
 	}
 
-	defer maintainDefaultRequestId()()
+	defer maintainDefaultRequestID()()
 
 	for _, test := range tests {
 		w := httptest.NewRecorder()

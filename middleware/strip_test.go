@@ -6,9 +6,11 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestStripSlashes(t *testing.T) {
@@ -154,7 +156,8 @@ func TestRedirectSlashes(t *testing.T) {
 		if resp.StatusCode != 301 {
 			t.Fatalf(body)
 		}
-		if resp.Header.Get("Location") != "/accounts/someuser" {
+		location := resp.Header.Get("Location")
+		if !strings.HasPrefix(location, "//") || !strings.HasSuffix(location, "/accounts/someuser") {
 			t.Fatalf("invalid redirection, should be /accounts/someuser")
 		}
 	}
@@ -165,9 +168,75 @@ func TestRedirectSlashes(t *testing.T) {
 		if resp.StatusCode != 301 {
 			t.Fatalf(body)
 		}
-		if resp.Header.Get("Location") != "/accounts/someuser?a=1&b=2" {
+		location := resp.Header.Get("Location")
+		if !strings.HasPrefix(location, "//") || !strings.HasSuffix(location, "/accounts/someuser?a=1&b=2") {
 			t.Fatalf("invalid redirection, should be /accounts/someuser?a=1&b=2")
 		}
+	}
 
+	// Ensure that we don't redirect to 'evil.com', but rather to 'server.url/evil.com/'
+	{
+		paths := []string{"//evil.com/", "///evil.com/"}
+
+		for _, p := range paths {
+			resp, body := testRequest(t, ts, "GET", p, nil)
+			if u, err := url.Parse(ts.URL); err != nil && resp.Request.URL.Host != u.Host {
+				t.Fatalf("host should remain the same. got: %q, want: %q", resp.Request.URL.Host, ts.URL)
+			}
+			if body != "nothing here" && resp.StatusCode != 404 {
+				t.Fatalf(body)
+			}
+		}
+	}
+
+	// Ensure that we don't redirect to 'evil.com', but rather to 'server.url/evil.com/'
+	{
+		resp, body := testRequest(t, ts, "GET", "//evil.com/", nil)
+		if u, err := url.Parse(ts.URL); err != nil && resp.Request.URL.Host != u.Host {
+			t.Fatalf("host should remain the same. got: %q, want: %q", resp.Request.URL.Host, ts.URL)
+		}
+		if body != "nothing here" && resp.StatusCode != 404 {
+			t.Fatalf(body)
+		}
+	}
+}
+
+// This tests a http.Handler that is not chi.Router
+// In these cases, the routeContext is nil
+func TestStripSlashesWithNilContext(t *testing.T) {
+	r := http.NewServeMux()
+
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("root"))
+	})
+
+	r.HandleFunc("/accounts", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("accounts"))
+	})
+
+	r.HandleFunc("/accounts/admin", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("admin"))
+	})
+
+	ts := httptest.NewServer(StripSlashes(r))
+	defer ts.Close()
+
+	if _, resp := testRequest(t, ts, "GET", "/", nil); resp != "root" {
+		t.Fatalf(resp)
+	}
+	if _, resp := testRequest(t, ts, "GET", "//", nil); resp != "root" {
+		t.Fatalf(resp)
+	}
+	if _, resp := testRequest(t, ts, "GET", "/accounts", nil); resp != "accounts" {
+		t.Fatalf(resp)
+	}
+	if _, resp := testRequest(t, ts, "GET", "/accounts/", nil); resp != "accounts" {
+		t.Fatalf(resp)
+	}
+	if _, resp := testRequest(t, ts, "GET", "/accounts/admin", nil); resp != "admin" {
+		t.Fatalf(resp)
+	}
+	if _, resp := testRequest(t, ts, "GET", "/accounts/admin/", nil); resp != "admin" {
+		t.Fatalf(resp)
 	}
 }
