@@ -203,11 +203,11 @@ func TestTreeMoar(t *testing.T) {
 	tr.InsertRoute(mGET, "/users/{id}/settings/*", hStub16)
 
 	tests := []struct {
-		m methodTyp // input request http method
-		r string    // input request path
-		h Handler   // output matched handler
-		k []string  // output param keys
-		v []string  // output param values
+		h Handler
+		r string
+		k []string
+		v []string
+		m methodTyp
 	}{
 		{m: mGET, r: "/articles/search", h: hStub1, k: []string{}, v: []string{}},
 		{m: mGET, r: "/articlefun", h: hStub5, k: []string{}, v: []string{}},
@@ -391,21 +391,26 @@ func TestTreeRegexMatchWholeParam(t *testing.T) {
 	rctx := NewRouteContext()
 	tr := &node{}
 	tr.InsertRoute(mGET, "/{id:[0-9]+}", hStub1)
+	tr.InsertRoute(mGET, "/{x:.+}/foo", hStub1)
+	tr.InsertRoute(mGET, "/{param:[0-9]*}/test", hStub1)
 
 	tests := []struct {
-		url             string
 		expectedHandler Handler
+		url             string
 	}{
 		{url: "/13", expectedHandler: hStub1},
 		{url: "/a13", expectedHandler: nil},
 		{url: "/13.jpg", expectedHandler: nil},
 		{url: "/a13.jpg", expectedHandler: nil},
+		{url: "/a/foo", expectedHandler: hStub1},
+		{url: "//foo", expectedHandler: nil},
+		{url: "//test", expectedHandler: hStub1},
 	}
 
 	for _, tc := range tests {
 		_, _, handler := tr.FindRoute(rctx, mGET, tc.url)
 		if fmt.Sprintf("%v", tc.expectedHandler) != fmt.Sprintf("%v", handler) {
-			t.Errorf("expecting handler:%v , got:%v", tc.expectedHandler, handler)
+			t.Errorf("url %v: expecting handler:%v , got:%v", tc.url, tc.expectedHandler, handler)
 		}
 	}
 }

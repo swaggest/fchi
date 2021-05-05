@@ -18,7 +18,8 @@ public API service, which in turn powers all of our client-side applications.
 The key considerations of chi's design are: project structure, maintainability, standard http
 handlers (stdlib-only), developer productivity, and deconstructing a large system into many small
 parts. The core router `github.com/go-chi/chi` is quite small (less than 1000 LOC), but we've also
-included some useful/optional subpackages: [middleware](/middleware), [render](https://github.com/go-chi/render) and [docgen](https://github.com/go-chi/docgen). We hope you enjoy it too!
+included some useful/optional subpackages: [middleware](/middleware), [render](https://github.com/go-chi/render)
+and [docgen](https://github.com/go-chi/docgen). We hope you enjoy it too!
 
 ## This Fork
 
@@ -168,7 +169,7 @@ func AdminOnly(next fchi.Handler) fchi.Handler {
 ```
 
 
-## Router design
+## Router interface
 
 chi's router is based on a kind of [Patricia Radix trie](https://en.wikipedia.org/wiki/Radix_tree).
 The router is fully compatible with `fasthttp`.
@@ -257,7 +258,16 @@ context and calls the next handler in the chain.
 // HTTP middleware setting a value on the request context
 func MyMiddleware(next fchi.Handler) fchi.Handler {
   return fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+    // create new context from `r` request context, and assign key `"user"`
+    // to value of `"123"`
     ctx = context.WithValue(r.Context(), "user", "123")
+
+    // call the next handler in the chain, passing the request context
+    // with the new context value.
+    //
+    // note: context.Context values are nested, so any previously set
+    // values will be accessible as well, and the new `"user"` key
+    // will be accessible from this point forward.
     next.ServeHTTP(ctx, rc)
   })
 }
@@ -273,7 +283,11 @@ the user sending an authenticated request, validated+set by a previous middlewar
 ```go
 // HTTP handler accessing data from the request context.
 func MyRequestHandler(ctx context.Context, rc *fasthttp.RequestCtx) {
+  // here we read from the request context and fetch out `"user"` key set in
+  // the MyMiddleware example above.
   user := ctx.Value("user").(string)
+
+  // respond to the client
   rc.Write([]byte(fmt.Sprintf("hi %s", user)))
 }
 ```
@@ -288,10 +302,14 @@ are able to access the same information.
 ```go
 // HTTP handler accessing the url routing parameters.
 func MyRequestHandler(ctx context.Context, rc *fasthttp.RequestCtx) {
+  // fetch the url parameter `"userID"` from the request of a matching
+  // routing pattern. An example routing pattern could be: /users/{userID}
   userID := fchi.URLParam(rc, "userID") // from a route like /users/{userID}
 
+  // fetch `"key"` from the request context
   key := ctx.Value("key").(string)
 
+  // respond to the client
   rc.Write([]byte(fmt.Sprintf("hi %v, %v", userID, key)))
 }
 ```
@@ -304,28 +322,70 @@ chi comes equipped with an optional `middleware` package, providing a suite of
 
 ### Core middlewares
 
------------------------------------------------------------------------------------------------------------
-| chi/middleware Handler | description                                                                    |
-|:----------------------|:---------------------------------------------------------------------------------
-| AllowContentType      | Explicit whitelist of accepted request Content-Types                            |
-| BasicAuth             | Basic HTTP authentication                                                       |
-| Compress              | Gzip compression for clients that accept compressed responses                   |
-| GetHead               | Automatically route undefined HEAD requests to GET handlers                     |
-| Heartbeat             | Monitoring endpoint to check the servers pulse                                  |
-| Logger                | Logs the start and end of each request with the elapsed processing time         |
-| NoCache               | Sets response headers to prevent clients from caching                           |
-| Profiler              | Easily attach net/http/pprof to your routers                                    |
-| RealIP                | Sets a http.Request's RemoteAddr to either X-Forwarded-For or X-Real-IP         |
-| Recoverer             | Gracefully absorb panics and prints the stack trace                             |
-| RequestID             | Injects a request ID into the context of each request                           |
-| RedirectSlashes       | Redirect slashes on routing paths                                               |
-| SetHeader             | Short-hand middleware to set a response header key/value                        |
-| StripSlashes          | Strip slashes on routing paths                                                  |
-| Throttle              | Puts a ceiling on the number of concurrent requests                             |
-| Timeout               | Signals to the request context when the timeout deadline is reached             |
-| URLFormat             | Parse extension from url and put it on request context                          |
-| WithValue             | Short-hand middleware to set a key/value on the request context                 |
------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
+| chi/middleware Handler | description                                                             |
+| :--------------------- | :---------------------------------------------------------------------- |
+| [AllowContentEncoding] | Enforces a whitelist of request Content-Encoding headers                |
+| [AllowContentType]     | Explicit whitelist of accepted request Content-Types                    |
+| [BasicAuth]            | Basic HTTP authentication                                               |
+| [Compress]             | Gzip compression for clients that accept compressed responses           |
+| [ContentCharset]       | Ensure charset for Content-Type request headers                         |
+| [CleanPath]            | Clean double slashes from request path                                  |
+| [GetHead]              | Automatically route undefined HEAD requests to GET handlers             |
+| [Heartbeat]            | Monitoring endpoint to check the servers pulse                          |
+| [Logger]               | Logs the start and end of each request with the elapsed processing time |
+| [NoCache]              | Sets response headers to prevent clients from caching                   |
+| [Profiler]             | Easily attach net/http/pprof to your routers                            |
+| [RealIP]               | Sets a http.Request's RemoteAddr to either X-Real-IP or X-Forwarded-For |
+| [Recoverer]            | Gracefully absorb panics and prints the stack trace                     |
+| [RequestID]            | Injects a request ID into the context of each request                   |
+| [RedirectSlashes]      | Redirect slashes on routing paths                                       |
+| [RouteHeaders]         | Route handling for request headers                                      |
+| [SetHeader]            | Short-hand middleware to set a response header key/value                |
+| [StripSlashes]         | Strip slashes on routing paths                                          |
+| [Throttle]             | Puts a ceiling on the number of concurrent requests                     |
+| [Timeout]              | Signals to the request context when the timeout deadline is reached     |
+| [URLFormat]            | Parse extension from url and put it on request context                  |
+| [WithValue]            | Short-hand middleware to set a key/value on the request context         |
+----------------------------------------------------------------------------------------------------
+
+[AllowContentEncoding]: https://pkg.go.dev/github.com/go-chi/chi/middleware#AllowContentEncoding
+[AllowContentType]: https://pkg.go.dev/github.com/go-chi/chi/middleware#AllowContentType
+[BasicAuth]: https://pkg.go.dev/github.com/go-chi/chi/middleware#BasicAuth
+[Compress]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Compress
+[ContentCharset]: https://pkg.go.dev/github.com/go-chi/chi/middleware#ContentCharset
+[CleanPath]: https://pkg.go.dev/github.com/go-chi/chi/middleware#CleanPath
+[GetHead]: https://pkg.go.dev/github.com/go-chi/chi/middleware#GetHead
+[GetReqID]: https://pkg.go.dev/github.com/go-chi/chi/middleware#GetReqID
+[Heartbeat]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Heartbeat
+[Logger]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Logger
+[NoCache]: https://pkg.go.dev/github.com/go-chi/chi/middleware#NoCache
+[Profiler]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Profiler
+[RealIP]: https://pkg.go.dev/github.com/go-chi/chi/middleware#RealIP
+[Recoverer]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Recoverer
+[RedirectSlashes]: https://pkg.go.dev/github.com/go-chi/chi/middleware#RedirectSlashes
+[RequestLogger]: https://pkg.go.dev/github.com/go-chi/chi/middleware#RequestLogger
+[RequestID]: https://pkg.go.dev/github.com/go-chi/chi/middleware#RequestID
+[RouteHeaders]: https://pkg.go.dev/github.com/go-chi/chi/middleware#RouteHeaders
+[SetHeader]: https://pkg.go.dev/github.com/go-chi/chi/middleware#SetHeader
+[StripSlashes]: https://pkg.go.dev/github.com/go-chi/chi/middleware#StripSlashes
+[Throttle]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Throttle
+[ThrottleBacklog]: https://pkg.go.dev/github.com/go-chi/chi/middleware#ThrottleBacklog
+[ThrottleWithOpts]: https://pkg.go.dev/github.com/go-chi/chi/middleware#ThrottleWithOpts
+[Timeout]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Timeout
+[URLFormat]: https://pkg.go.dev/github.com/go-chi/chi/middleware#URLFormat
+[WithLogEntry]: https://pkg.go.dev/github.com/go-chi/chi/middleware#WithLogEntry
+[WithValue]: https://pkg.go.dev/github.com/go-chi/chi/middleware#WithValue
+[Compressor]: https://pkg.go.dev/github.com/go-chi/chi/middleware#Compressor
+[DefaultLogFormatter]: https://pkg.go.dev/github.com/go-chi/chi/middleware#DefaultLogFormatter
+[EncoderFunc]: https://pkg.go.dev/github.com/go-chi/chi/middleware#EncoderFunc
+[HeaderRoute]: https://pkg.go.dev/github.com/go-chi/chi/middleware#HeaderRoute
+[HeaderRouter]: https://pkg.go.dev/github.com/go-chi/chi/middleware#HeaderRouter
+[LogEntry]: https://pkg.go.dev/github.com/go-chi/chi/middleware#LogEntry
+[LogFormatter]: https://pkg.go.dev/github.com/go-chi/chi/middleware#LogFormatter
+[LoggerInterface]: https://pkg.go.dev/github.com/go-chi/chi/middleware#LoggerInterface
+[ThrottleOpts]: https://pkg.go.dev/github.com/go-chi/chi/middleware#ThrottleOpts
+[WrapResponseWriter]: https://pkg.go.dev/github.com/go-chi/chi/middleware#WrapResponseWriter
 
 ### Extra middlewares & packages
 
@@ -345,8 +405,6 @@ Please see https://github.com/go-chi for additional packages.
 | [stampede](https://github.com/go-chi/stampede)     | HTTP request coalescer                                      |
 --------------------------------------------------------------------------------------------------------------------
 
-please [submit a PR](./CONTRIBUTING.md) if you'd like to include a link to a chi-compatible middleware
-
 
 ## context?
 
@@ -365,17 +423,25 @@ and..
 
 The benchmark suite: https://github.com/pkieltyka/go-http-routing-benchmark
 
-Results as of Jan 9, 2019 with Go 1.11.4 on Linux X1 Carbon laptop
+Results as of Nov 29, 2020 with Go 1.15.5 on Linux AMD 3950x
 
 ```shell
-BenchmarkMux/route:/-16                  6323047               167 ns/op              83 B/op          0 allocs/op
-BenchmarkMux/route:/hi-16                5262666               193 ns/op              83 B/op          1 allocs/op
-BenchmarkMux/route:/sup/123/and/this-16                  2106927               499 ns/op             435 B/op          1 allocs/op
-BenchmarkMux/route:/sup/123/foo/this-16                  1526112               798 ns/op             677 B/op          1 allocs/op
-BenchmarkMux/route:/sharing/z/aBc-16                     6755617               159 ns/op              97 B/op          0 allocs/op
-BenchmarkMux/route:/sharing/z/aBc/twitter-16             9653289               133 ns/op             107 B/op          0 allocs/op
-BenchmarkMux/route:/sharing/z/aBc/direct-16              6590539               153 ns/op              80 B/op          0 allocs/op
-BenchmarkMux/route:/sharing/z/aBc/direct/download-16             9125960               115 ns/op              90 B/op          0 allocs/op
+BenchmarkChi_Param          	3075895	        384 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_Param5         	2116603	        566 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_Param20        	 964117	       1227 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_ParamWrite     	2863413	        420 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_GithubStatic   	3045488	        395 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_GithubParam    	2204115	        540 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_GithubAll      	  10000	     113811 ns/op	    81203 B/op    406 allocs/op
+BenchmarkChi_GPlusStatic    	3337485	        359 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_GPlusParam     	2825853	        423 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_GPlus2Params   	2471697	        483 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_GPlusAll       	 194220	       5950 ns/op	     5200 B/op     26 allocs/op
+BenchmarkChi_ParseStatic    	3365324	        356 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_ParseParam     	2976614	        404 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_Parse2Params   	2638084	        439 ns/op	      400 B/op      2 allocs/op
+BenchmarkChi_ParseAll       	 109567	      11295 ns/op	    10400 B/op     52 allocs/op
+BenchmarkChi_StaticAll      	  16846	      71308 ns/op	    62802 B/op    314 allocs/op
 ```
 
 Comparison with other routers: https://gist.github.com/pkieltyka/123032f12052520aaccab752bd3e78cc
@@ -416,3 +482,8 @@ Looking beyond REST, I also recommend some newer works in the field:
 Copyright (c) 2015-present [Peter Kieltyka](https://github.com/pkieltyka)
 
 Licensed under [MIT License](./LICENSE)
+
+[GoDoc]: https://pkg.go.dev/github.com/go-chi/chi?tab=versions
+[GoDoc Widget]: https://godoc.org/github.com/go-chi/chi?status.svg
+[Travis]: https://travis-ci.org/go-chi/chi
+[Travis Widget]: https://travis-ci.org/go-chi/chi.svg?branch=master

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 )
 
 var (
@@ -56,7 +56,7 @@ func URLFormat(next http.Handler) http.Handler {
 
 		if strings.Index(path, ".") > 0 {
 			base := strings.LastIndex(path, "/")
-			idx := strings.Index(path[base:], ".")
+			idx := strings.LastIndex(path[base:], ".")
 
 			if idx > 0 {
 				idx += base

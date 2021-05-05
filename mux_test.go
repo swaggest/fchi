@@ -413,8 +413,18 @@ func TestMuxNestedMethodNotAllowed(t *testing.T) {
 		rc.Write([]byte("sub2"))
 	}))
 
+	pathVar := NewRouter()
+	pathVar.Get("/{var}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("pv"))
+	}))
+	pathVar.MethodNotAllowed(HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Response.SetStatusCode(405)
+		rc.Write([]byte("pv 405"))
+	}))
+
 	r.Mount("/prefix1", sr1)
 	r.Mount("/prefix2", sr2)
+	r.Mount("/pathVar", pathVar)
 
 	ts := NewTestServer(r)
 	defer ts.Close()
@@ -435,6 +445,12 @@ func TestMuxNestedMethodNotAllowed(t *testing.T) {
 		t.Fatalf(body)
 	}
 	if _, body := testRequest(t, ts, "PUT", "/prefix2/sub2", nil); body != "root 405" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "GET", "/pathVar/myvar", nil); body != "pv" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "DELETE", "/pathVar/myvar", nil); body != "pv 405" {
 		t.Fatalf(body)
 	}
 }
@@ -585,7 +601,7 @@ func TestMuxWith(t *testing.T) {
 }
 
 func TestRouterFromMuxWith(t *testing.T) {
-	//t.Parallel()
+	t.Parallel()
 
 	r := NewRouter()
 
@@ -1198,11 +1214,11 @@ func TestServeHTTPExistingContext(t *testing.T) {
 	}))
 
 	testcases := []struct {
+		Ctx            context.Context
 		Method         string
 		Path           string
-		Ctx            context.Context
-		ExpectedStatus int
 		ExpectedBody   string
+		ExpectedStatus int
 	}{
 		{
 			Method:         "GET",
@@ -1426,7 +1442,7 @@ func TestMuxWildcardRouteCheckTwo(t *testing.T) {
 
 func TestMuxRegexp(t *testing.T) {
 	r := NewRouter()
-	r.Route("/{param:[0-9]+}/test", func(r Router) {
+	r.Route("/{param:[0-9]*}/test", func(r Router) {
 		r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
 			rc.Write([]byte(fmt.Sprintf("Hi: %s", URLParam(rc, "param"))))
 		}))
@@ -1497,6 +1513,38 @@ func TestMuxRegexp3(t *testing.T) {
 	}
 }
 
+func TestMuxSubrouterWildcardParam(t *testing.T) {
+	h := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		fmt.Fprintf(rc, "param:%v *:%v", URLParam(rc, "param"), URLParam(rc, "*"))
+	})
+
+	r := NewRouter()
+
+	r.Get("/bare/{param}", h)
+	r.Get("/bare/{param}/*", h)
+
+	r.Route("/case0", func(r Router) {
+		r.Get("/{param}", h)
+		r.Get("/{param}/*", h)
+	})
+
+	ts := NewTestServer(r)
+	defer ts.Close()
+
+	if _, body := testRequest(t, ts, "GET", "/bare/hi", nil); body != "param:hi *:" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "GET", "/bare/hi/yes", nil); body != "param:hi *:yes" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "GET", "/case0/hi", nil); body != "param:hi *:" {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "GET", "/case0/hi/yes", nil); body != "param:hi *:yes" {
+		t.Fatalf(body)
+	}
+}
+
 func TestMuxContextIsThreadSafe(t *testing.T) {
 	router := NewRouter()
 	router.Get("/{id}", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
@@ -1512,7 +1560,7 @@ func TestMuxContextIsThreadSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for j := 0; j < 10000; j++ {
 				rc := fasthttp.RequestCtx{}
 				rc.Request.Header.SetMethod("GET")
 				rc.Request.SetRequestURI("/ok")
@@ -1569,6 +1617,32 @@ func TestEscapedURLParams(t *testing.T) {
 	}
 }
 
+func TestCustomHTTPMethod(t *testing.T) {
+	// first we must register this method to be accepted, then we
+	// can define method handlers on the router below
+	RegisterMethod("BOO")
+
+	r := NewRouter()
+	r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("."))
+	}))
+
+	// note the custom BOO method for route /hi
+	r.Method("BOO", "/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		rc.Write([]byte("custom method"))
+	}))
+
+	ts := NewTestServer(r)
+	defer ts.Close()
+
+	if _, body := testRequest(t, ts, "GET", "/", nil); body != "." {
+		t.Fatalf(body)
+	}
+	if _, body := testRequest(t, ts, "BOO", "/hi", nil); body != "custom method" {
+		t.Fatalf(body)
+	}
+}
+
 func TestMuxMatch(t *testing.T) {
 	r := NewRouter()
 	r.Get("/hi", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
@@ -1604,6 +1678,29 @@ func TestMuxMatch(t *testing.T) {
 	tctx.Reset()
 	if r.Match(tctx, "HEAD", "/articles/10") == true {
 		t.Fatal("not expecting to find match for route:", "HEAD", "/articles/10")
+	}
+}
+
+func TestServerBaseContext(t *testing.T) {
+	r := NewRouter()
+	r.Get("/", HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		baseYes := ctx.Value(ctxKey{"base"}).(string)
+		rc.Write([]byte(baseYes))
+	}))
+
+	// Setup http Server with a base context
+	baseCtx := context.WithValue(context.Background(), ctxKey{"base"}, "yes")
+
+	rh := HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		r.ServeHTTP(baseCtx, rc)
+	})
+
+	ts := NewTestServer(rh)
+
+	defer ts.Close()
+
+	if _, body := testRequest(t, ts, "GET", "/", nil); body != "yes" {
+		t.Fatalf(body)
 	}
 }
 

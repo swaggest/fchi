@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/valve"
 )
 
@@ -83,7 +84,10 @@ func main() {
 		w.Write([]byte(fmt.Sprintf("all done.\n")))
 	})
 
-	srv := http.Server{Addr: ":3333", Handler: chi.ServerBaseContext(baseCtx, r)}
+	srv := http.Server{Addr: ":3333", Handler: r}
+	srv.BaseContext = func(_ net.Listener) context.Context {
+		return baseCtx
+	}
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
