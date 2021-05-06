@@ -53,7 +53,7 @@ import (
 
 	"github.com/swaggest/fchi"
 	"github.com/swaggest/fchi/middleware"
-    "github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp"
 )
 
 func main() {

@@ -1,3 +1,5 @@
-.idea
-*.sw?
-.vscode
+/.idea
+/*.coverprofile
+/.vscode
+/bench-*.txt
+/vendor
