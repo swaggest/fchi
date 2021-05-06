@@ -1,4 +1,4 @@
-# <img src="https://avatars2.githubusercontent.com/u/42277636?s=100&v=4" /> <img alt="chi" src="https://cdn.rawgit.com/go-chi/chi/master/_examples/chi.svg" width="220" />
+# <img src="https://avatars2.githubusercontent.com/u/42277636?s=100&v=4" /> <img alt="chi" src="https://cdn.rawgit.com/go-chi/chi/master/_examples/chi.svg" width="100" />
 
 [![Build Status](https://github.com/swaggest/fchi/workflows/test/badge.svg)](https://github.com/swaggest/fchi/actions?query=branch%3Amaster+workflow%3Atest)
 [![Coverage Status](https://codecov.io/gh/swaggest/fchi/branch/master/graph/badge.svg)](https://codecov.io/gh/swaggest/fchi)
@@ -53,7 +53,7 @@ import (
 
 	"github.com/swaggest/fchi"
 	"github.com/swaggest/fchi/middleware"
-    "github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp"
 )
 
 func main() {
