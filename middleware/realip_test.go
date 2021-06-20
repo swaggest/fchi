@@ -1,32 +1,28 @@
-// TODO convert middleware to fasthttp.
-// +build ignore
-
 package middleware
 
 import (
-	"net/http"
-	"net/http/httptest"
+	"context"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 func TestXRealIP(t *testing.T) {
-	req, _ := http.NewRequest("GET", "/", nil)
-	req.Header.Add("X-Real-IP", "100.100.100.100")
-	w := httptest.NewRecorder()
+	req := &fasthttp.RequestCtx{}
+	req.Request.URI().SetPath("/")
+	req.Request.Header.Set(xRealIP, "100.100.100.100")
 
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 	r.Use(RealIP)
 
 	realIP := ""
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		realIP = r.RemoteAddr
-		w.Write([]byte("Hello World"))
-	})
-	r.ServeHTTP(w, req)
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		realIP = rc.RemoteAddr().String()
+	}))
+	r.ServeHTTP(context.TODO(), req)
 
-	if w.Code != 200 {
+	if req.Response.StatusCode() != 200 {
 		t.Fatal("Response Code should be 200")
 	}
 
@@ -36,21 +32,20 @@ func TestXRealIP(t *testing.T) {
 }
 
 func TestXForwardForIP(t *testing.T) {
-	req, _ := http.NewRequest("GET", "/", nil)
-	req.Header.Add("X-Forwarded-For", "100.100.100.100")
-	w := httptest.NewRecorder()
+	req := &fasthttp.RequestCtx{}
+	req.Request.URI().SetPath("/")
+	req.Request.Header.Set(xForwardedFor, "100.100.100.100")
 
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 	r.Use(RealIP)
 
 	realIP := ""
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		realIP = r.RemoteAddr
-		w.Write([]byte("Hello World"))
-	})
-	r.ServeHTTP(w, req)
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		realIP = rc.RemoteAddr().String()
+	}))
+	r.ServeHTTP(context.TODO(), req)
 
-	if w.Code != 200 {
+	if req.Response.StatusCode() != 200 {
 		t.Fatal("Response Code should be 200")
 	}
 
@@ -60,26 +55,25 @@ func TestXForwardForIP(t *testing.T) {
 }
 
 func TestXForwardForXRealIPPrecedence(t *testing.T) {
-	req, _ := http.NewRequest("GET", "/", nil)
-	req.Header.Add("X-Forwarded-For", "0.0.0.0")
-	req.Header.Add("X-Real-IP", "100.100.100.100")
-	w := httptest.NewRecorder()
+	req := &fasthttp.RequestCtx{}
+	req.Request.URI().SetPath("/")
+	req.Request.Header.Set(xForwardedFor, "0.0.0.0")
+	req.Request.Header.Set(xRealIP, "100.100.100.100")
 
-	r := chi.NewRouter()
+	r := fchi.NewRouter()
 	r.Use(RealIP)
 
 	realIP := ""
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		realIP = r.RemoteAddr
-		w.Write([]byte("Hello World"))
-	})
-	r.ServeHTTP(w, req)
+	r.Get("/", fchi.HandlerFunc(func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		realIP = rc.RemoteAddr().String()
+	}))
+	r.ServeHTTP(context.TODO(), req)
 
-	if w.Code != 200 {
+	if req.Response.StatusCode() != 200 {
 		t.Fatal("Response Code should be 200")
 	}
 
 	if realIP != "100.100.100.100" {
-		t.Fatal("Test get real IP precedence error.")
+		t.Fatal("Test get real IP error.")
 	}
 }
