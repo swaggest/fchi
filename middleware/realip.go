@@ -1,14 +1,16 @@
-// TODO convert middleware to fasthttp.
-// +build ignore
-
 package middleware
 
 // Ported from Goji's middleware, source:
 // https://github.com/zenazn/goji/tree/master/web/middleware
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"strings"
+
+	"github.com/swaggest/fchi"
+	"github.com/valyala/fasthttp"
 )
 
 var xForwardedFor = http.CanonicalHeaderKey("X-Forwarded-For")
@@ -29,29 +31,28 @@ var xRealIP = http.CanonicalHeaderKey("X-Real-IP")
 // values from the client, or if you use this middleware without a reverse
 // proxy, malicious clients will be able to make you very sad (or, depending on
 // how you're using RemoteAddr, vulnerable to an attack of some sort).
-func RealIP(h http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, r *http.Request) {
-		if rip := realIP(r); rip != "" {
-			r.RemoteAddr = rip
+func RealIP(next fchi.Handler) fchi.Handler {
+	fn := func(ctx context.Context, rc *fasthttp.RequestCtx) {
+		if rip := realIP(rc); rip != "" {
+			rc.SetRemoteAddr(&net.IPAddr{IP: net.ParseIP(rip)})
 		}
-		h.ServeHTTP(w, r)
+		next.ServeHTTP(ctx, rc)
 	}
 
-	return http.HandlerFunc(fn)
+	return fchi.HandlerFunc(fn)
 }
 
-func realIP(r *http.Request) string {
+func realIP(rc *fasthttp.RequestCtx) string {
 	var ip string
 
-	if xrip := r.Header.Get(xRealIP); xrip != "" {
-		ip = xrip
-	} else if xff := r.Header.Get(xForwardedFor); xff != "" {
-		i := strings.Index(xff, ", ")
+	if xrip := rc.Request.Header.Peek(xRealIP); len(xrip) > 0 {
+		ip = string(xrip)
+	} else if xff := rc.Request.Header.Peek(xForwardedFor); len(xff) > 0 {
+		i := strings.Index(string(xff), ", ")
 		if i == -1 {
 			i = len(xff)
 		}
-		ip = xff[:i]
+		ip = string(xff[:i])
 	}
-
 	return ip
 }
